@@ -2,20 +2,40 @@ const socket = io("https://algebra-but-better.onrender.com");
 let myColor = null; 
 let currentPassword = null;
 
-// Multiplayer Listeners
-socket.on("player-assignment", (assignedColor) => {
-    myColor = assignedColor;
-    console.log("You are playing as:", myColor);
+// 1. MULTIPLAYER LISTENERS
+socket.on("player-assignment", (data) => {
+    myColor = data.color;
+    // Force settings to match what the server says
+    let m = parseInt(data.settings.mins);
+    whiteTime = m * 60; 
+    blackTime = whiteTime;
+    isInfinite = (m === 0);
+    whiteName = data.settings.whiteName;
+    
+    if (myColor === "black") {
+        blackName = document.getElementById('uName').value;
+    } else {
+        blackName = "Waiting...";
+    }
+    
     initGameState();
 });
 
-socket.on("receive-move", (move) => {
-    handleActualMove(move.from, move.to, false);
+socket.on("opponent-joined", (data) => {
+    blackName = data.blackName;
+    render();
+});
+
+socket.on("receive-move", (data) => {
+    // Sync time if provided to prevent drift
+    if (data.whiteTime !== undefined) whiteTime = data.whiteTime;
+    if (data.blackTime !== undefined) blackTime = data.blackTime;
+    handleActualMove(data.move.from, data.move.to, false);
 });
 
 socket.on("error-msg", (msg) => alert(msg));
 
-// Game State Variables
+// 2. GAME VARIABLES
 const whiteChars = ['♖', '♘', '♗', '♕', '♔', '♙'];
 const isWhite = (char) => whiteChars.includes(char);
 const getTeam = (char) => char === '' ? null : (isWhite(char) ? 'white' : 'black');
@@ -25,10 +45,15 @@ const getPieceNotation = (p) => {
 };
 
 let boardState, currentTurn, hasMoved, enPassantTarget, selected, isGameOver, isInfinite;
-let whiteName, blackName, whiteTime, blackTime, moveHistory, increment;
+let whiteName, blackName, whiteTime, blackTime, moveHistory, increment = 0;
 const mainLayout = document.getElementById('main-layout');
 
-function formatTime(s) { return isInfinite ? "" : `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
+// 3. CLOCK LOGIC
+function formatTime(s) { 
+    if (isInfinite) return "∞";
+    if (s < 0) s = 0;
+    return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; 
+}
 
 function killClocks() { if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance); }
 
@@ -39,7 +64,7 @@ function startTimer() {
         if (isGameOver) return killClocks();
         if (currentTurn === 'white') whiteTime--; else blackTime--;
         updateTimerDisplay();
-        if (whiteTime <= 0 || blackTime <= 0) endGame(currentTurn === 'white' ? "BLACK WINS ON TIME" : "WHITE WINS ON TIME");
+        if (whiteTime <= 0 || blackTime <= 0) endGame(whiteTime <= 0 ? "BLACK WINS ON TIME" : "WHITE WINS ON TIME");
     }, 1000);
 }
 
@@ -51,19 +76,12 @@ function updateTimerDisplay() {
 
 function endGame(msg) { isGameOver = true; killClocks(); render(msg); }
 
-function getNotation(fR, fC, tR, tC, piece, target, isEP, castle) {
-    if (castle) return castle === 'short' ? 'O-O' : 'O-O-O';
-    const files = ['a','b','c','d','e','f','g','h'], rows = ['8','7','6','5','4','3','2','1'];
-    let p = getPieceNotation(piece), cap = (target !== '' || isEP) ? 'x' : '';
-    if (p === '' && cap) p = files[fC]; 
-    return p + cap + files[tC] + rows[tR];
-}
-
+// 4. CHESS MECHANICS
 function validateMoveMechanics(fR, fC, tR, tC, p, tar, b) {
     const dr = tR-fR, dc = tC-fC, adr = Math.abs(dr), adc = Math.abs(dc), team = getTeam(p);
     if (tar !== '' && getTeam(tar) === team) return false;
     const clear = (r1, c1, r2, c2) => {
-        const sr = r2 === r1 ? 0 : (r2-r1)/adr, sc = c2 === c1 ? 0 : (c2-c1)/adc;
+        const sr = r2 === r1 ? 0 : (r2-r1)/Math.abs(r2-r1), sc = c2 === c1 ? 0 : (c2-c1)/Math.abs(c2-c1);
         let cr = r1+sr, cc = c1+sc;
         while(cr !== r2 || cc !== c2) { if (b[cr][cc] !== '') return false; cr+=sr; cc+=sc; }
         return true;
@@ -89,8 +107,9 @@ function validateMoveMechanics(fR, fC, tR, tC, p, tar, b) {
 
 function isInCheck(team, b) {
     const k = team === 'white' ? '♔' : '♚', atkTeam = team==='white'?'black':'white';
-    let kr, kc;
+    let kr = -1, kc = -1;
     for(let r=0; r<8; r++) for(let c=0; c<8; c++) if(b[r][c]===k){kr=r;kc=c;}
+    if(kr === -1) return false;
     for(let i=0; i<8; i++) for(let j=0; j<8; j++) if(b[i][j]!=='' && getTeam(b[i][j])===atkTeam && validateMoveMechanics(i,j,kr,kc,b[i][j],b[kr][kc],b)) return true;
     return false;
 }
@@ -112,20 +131,30 @@ function handleActualMove(from, to, isLocal) {
         boardState[to.r][rN] = boardState[to.r][rO]; boardState[to.r][rO] = '';
     }
 
-    let note = getNotation(from.r, from.c, to.r, to.c, p, boardState[to.r][to.c], isEP, castle);
     if(isEP) boardState[from.r][to.c] = '';
-    hasMoved[`${from.r},${from.c}`] = 1; boardState[to.r][to.c] = p; boardState[from.r][from.c] = '';
-    if(p==='♙'&& to.r===0) boardState[to.r][to.c] = '♕'; if(p==='♟'&& to.r===7) boardState[to.r][to.c] = '♛';
-    
-    if(currentTurn === 'white') moveHistory.push({w: note, b: ''}); else moveHistory[moveHistory.length-1].b = note;
+    hasMoved[`${from.r},${from.c}`] = 1; 
+    boardState[to.r][to.c] = p; 
+    boardState[from.r][from.c] = '';
+
+    if(p==='♙'&& to.r===0) boardState[to.r][to.c] = '♕'; 
+    if(p==='♟'&& to.r===7) boardState[to.r][to.c] = '♛';
 
     enPassantTarget = (p==='♙'||p==='♟') && Math.abs(from.r - to.r) === 2 ? {r:(from.r+to.r)/2, c: to.c} : null;
     currentTurn = currentTurn === 'white' ? 'black' : 'white';
     selected = null;
-    if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to } });
+
+    if (isLocal) {
+        socket.emit("send-move", { 
+            password: currentPassword, 
+            move: { from, to },
+            whiteTime: whiteTime,
+            blackTime: blackTime
+        });
+    }
     render();
 }
 
+// 5. UI RENDERING
 function render(forcedStatus) {
     mainLayout.replaceChildren();
     const check = isInCheck(currentTurn, boardState);
@@ -172,11 +201,7 @@ function render(forcedStatus) {
     mainLayout.appendChild(gArea);
 
     const side = document.createElement('div'); side.id = 'side-panel';
-    side.innerHTML = `<div id="status-box"><div id="status-text">${sTxt}</div></div><div id="history-container"></div>`;
-    const hCont = side.querySelector('#history-container');
-    moveHistory.forEach((m, i) => {
-        hCont.innerHTML += `<div class="history-row"><div class="move-num">${i+1}.</div><div class="move-val">${m.w}</div><div class="move-val">${m.b}</div></div>`;
-    });
+    side.innerHTML = `<div id="status-box"><div id="status-text">${sTxt}</div></div>`;
     mainLayout.appendChild(side);
     updateTimerDisplay();
 }
@@ -186,20 +211,19 @@ function showSetup() {
     overlay.id = 'setup-overlay';
     overlay.innerHTML = `
         <div class="setup-card">
-            <h2>Multiplayer Setup</h2>
+            <h2>Chess Lobby</h2>
             <div class="input-group"><label>Room Password</label><input id="roomPass" placeholder="Secret Code"></div>
             <div class="input-group"><label>Your Name</label><input id="uName" value="Player"></div>
-            <div class="input-group"><label>Minutes</label><input type="number" id="tMin" value="10"></div>
-            <button class="start-btn" id="startBtn">JOIN ROOM</button>
+            <div class="input-group"><label>Minutes (for White only)</label><input type="number" id="tMin" value="10"></div>
+            <button class="start-btn" id="startBtn">JOIN / CREATE ROOM</button>
         </div>`;
     document.body.appendChild(overlay);
     document.getElementById('startBtn').onclick = () => {
         currentPassword = document.getElementById('roomPass').value;
+        const name = document.getElementById('uName').value;
+        const mins = document.getElementById('tMin').value;
         if(!currentPassword) return alert("Enter a password!");
-        whiteName = "White"; blackName = "Black"; // Placeholders until start
-        let m = parseInt(document.getElementById('tMin').value);
-        whiteTime = m * 60; blackTime = whiteTime; isInfinite = (m === 0);
-        socket.emit("join-room", currentPassword);
+        socket.emit("join-room", { password: currentPassword, name: name, mins: mins });
         overlay.remove();
     };
 }

@@ -3,7 +3,7 @@ let myColor = null;
 let currentPassword = null;
 let whiteName = "White", blackName = "Black"; 
 
-// 1. MULTIPLAYER LISTENERS
+// MULTIPLAYER LISTENERS
 socket.on("player-assignment", (data) => {
     myColor = data.color;
     let m = parseInt(data.settings.mins) || 10;
@@ -11,14 +11,11 @@ socket.on("player-assignment", (data) => {
     blackTime = whiteTime;
     isInfinite = (m === 0);
     whiteName = data.settings.whiteName || "White";
-    
     if (myColor === "black") {
-        const localName = document.getElementById('uName')?.value;
-        blackName = localName || "Black";
+        blackName = document.getElementById('uName')?.value || "Black";
     } else {
         blackName = "Waiting...";
     }
-    
     initGameState();
 });
 
@@ -35,7 +32,7 @@ socket.on("receive-move", (data) => {
 
 socket.on("error-msg", (msg) => alert(msg));
 
-// 2. GAME VARIABLES
+// PIECE MAPPING
 const whiteChars = ['♖', '♘', '♗', '♕', '♔', '♙'];
 const isWhite = (char) => whiteChars.includes(char);
 const getTeam = (char) => char === '' ? null : (isWhite(char) ? 'white' : 'black');
@@ -48,18 +45,16 @@ let boardState, currentTurn, hasMoved, enPassantTarget, selected, isGameOver, is
 let whiteTime, blackTime, moveHistory;
 const mainLayout = document.getElementById('main-layout');
 
-// 3. VALIDATION LOGIC (The "Brain")
+// VALIDATION BRAIN
 function validateMoveMechanics(fR, fC, tR, tC, p, tar, b) {
     const dr = tR-fR, dc = tC-fC, adr = Math.abs(dr), adc = Math.abs(dc), team = getTeam(p);
     if (tar !== '' && getTeam(tar) === team) return false;
-
     const clear = (r1, c1, r2, c2) => {
-        const sr = r2 === r1 ? 0 : (r2-r1)/Math.abs(r2-r1), sc = c2 === c1 ? 0 : (c2-c1)/Math.abs(c2-c1);
+        const sr = r2 === r1 ? 0 : (r2-r1)/Math.max(1, Math.abs(r2-r1)), sc = c2 === c1 ? 0 : (c2-c1)/Math.max(1, Math.abs(c2-c1));
         let cr = r1+sr, cc = c1+sc;
         while(cr !== r2 || cc !== c2) { if (b[cr][cc] !== '') return false; cr+=sr; cc+=sc; }
         return true;
     };
-
     if (p === '♙' || p === '♟') {
         const dir = team === 'white' ? -1 : 1;
         if (dc === 0 && tar === '') return dr === dir || (dr === 2*dir && fR === (team === 'white'?6:1) && b[fR+dir][fC] === '');
@@ -103,7 +98,7 @@ function getNotation(fR, fC, tR, tC, piece, target, isEP, castle) {
     return p + cap + files[tC] + rows[tR];
 }
 
-// 4. EXECUTION LOGIC
+// EXECUTION
 function handleActualMove(from, to, isLocal) {
     const p = boardState[from.r][from.c];
     const isEP = (p==='♙'||p==='♟') && enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
@@ -117,50 +112,23 @@ function handleActualMove(from, to, isLocal) {
 
     let note = getNotation(from.r, from.c, to.r, to.c, p, boardState[to.r][to.c], isEP, castle);
     if(isEP) boardState[from.r][to.c] = '';
-    
     hasMoved[`${from.r},${from.c}`] = 1; 
-    boardState[to.r][to.c] = p; 
-    boardState[from.r][from.c] = '';
-
-    if(p==='♙'&& to.r===0) boardState[to.r][to.c] = '♕'; 
-    if(p==='♟'&& to.r===7) boardState[to.r][to.c] = '♛';
+    boardState[to.r][to.c] = p; boardState[from.r][from.c] = '';
+    if(p==='♙'&& to.r===0) boardState[to.r][to.c] = '♕'; if(p==='♟'&& to.r===7) boardState[to.r][to.c] = '♛';
     if(isInCheck(currentTurn==='white'?'black':'white', boardState)) note += '+';
 
-    if(currentTurn === 'white') moveHistory.push({w: note, b: ''}); 
-    else moveHistory[moveHistory.length-1].b = note;
+    if(currentTurn === 'white') moveHistory.push({w: note, b: ''}); else moveHistory[moveHistory.length-1].b = note;
 
     enPassantTarget = (p==='♙'||p==='♟') && Math.abs(from.r - to.r) === 2 ? {r:(from.r+to.r)/2, c: to.c} : null;
     currentTurn = currentTurn === 'white' ? 'black' : 'white';
     selected = null;
-
-    if (isLocal) {
-        socket.emit("send-move", { 
-            password: currentPassword, 
-            move: { from, to },
-            whiteTime: whiteTime,
-            blackTime: blackTime
-        });
-    }
+    if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to }, whiteTime, blackTime });
     render();
-}
-
-// 5. RENDERING & UI
-function formatTime(s) { 
-    if (isInfinite) return "∞";
-    const dS = Math.max(0, s);
-    return `${Math.floor(dS/60)}:${(dS%60).toString().padStart(2,'0')}`; 
-}
-
-function updateTimerDisplay() {
-    const wT = document.getElementById('timer-white'), bT = document.getElementById('timer-black');
-    if (wT) { wT.textContent = formatTime(whiteTime); wT.className = `timer ${currentTurn === 'white' ? 'active' : ''}`; }
-    if (bT) { bT.textContent = formatTime(blackTime); bT.className = `timer ${currentTurn === 'black' ? 'active' : ''}`; }
 }
 
 function render(forcedStatus) {
     if (!mainLayout) return;
     mainLayout.replaceChildren();
-    
     const check = isInCheck(currentTurn, boardState);
     let sTxt = forcedStatus || `${currentTurn.toUpperCase()}'S TURN ${check?'(CHECK!)':''}`;
 
@@ -170,46 +138,35 @@ function render(forcedStatus) {
         div.innerHTML = `<span class="player-name">${name} ${myColor === id ? '(YOU)' : ''}</span><div id="timer-${id}" class="timer"></div>`;
         return div;
     };
-
     gArea.appendChild(createBar(blackName, 'black'));
-    const bWrap = document.createElement('div'); bWrap.id = 'board-container';
-    const bEl = document.createElement('div'); bEl.id = 'board';
 
-    // Highlight possible moves (The Dots)
+    const bEl = document.createElement('div'); bEl.id = 'board';
     let possibleMoves = [];
     if(selected && !isGameOver) {
         const p = boardState[selected.r][selected.c];
-        for(let r=0; r<8; r++) for(let c=0; c<8; c++) {
-            if(moveIsLegal(selected.r, selected.c, r, c, p, currentTurn)) possibleMoves.push({r,c});
-        }
+        for(let r=0; r<8; r++) for(let c=0; c<8; c++) if(moveIsLegal(selected.r, selected.c, r, c, p, currentTurn)) possibleMoves.push({r,c});
     }
 
     for(let r=0; r<8; r++) for(let c=0; c<8; c++) {
         const sq = document.createElement('div'); const char = boardState[r][c];
         sq.className = `square ${(r+c)%2===0?'white-sq':'black-sq'}`;
         if(selected?.r===r && selected?.c===c) sq.classList.add('selected');
-        
         if(possibleMoves.some(m => m.r===r && m.c===c)) {
             const h = document.createElement('div'); h.className = char === '' ? 'hint-dot' : 'hint-capture'; sq.appendChild(h);
         }
-
         if(char) {
             const sp = document.createElement('span'); sp.className = `piece ${isWhite(char)?'w-piece':'b-piece'}`; sp.textContent = char; sq.appendChild(sp);
         }
         sq.onclick = () => {
             if(isGameOver || currentTurn !== myColor) return;
             if(selected) {
-                if(moveIsLegal(selected.r, selected.c, r, c, boardState[selected.r][selected.c], currentTurn)) {
-                    handleActualMove(selected, {r, c}, true);
-                } else {
-                    selected = getTeam(char) === currentTurn ? {r,c} : null; render();
-                }
-            } else if(getTeam(char) === currentTurn) { 
-                selected = {r,c}; render(); 
-            }
+                if(moveIsLegal(selected.r, selected.c, r, c, boardState[selected.r][selected.c], currentTurn)) handleActualMove(selected, {r, c}, true);
+                else { selected = getTeam(char) === currentTurn ? {r,c} : null; render(); }
+            } else if(getTeam(char) === currentTurn) { selected = {r,c}; render(); }
         };
         bEl.appendChild(sq);
     }
+    const bWrap = document.createElement('div'); bWrap.id = 'board-container';
     bWrap.appendChild(bEl); gArea.appendChild(bWrap);
     gArea.appendChild(createBar(whiteName, 'white'));
     mainLayout.appendChild(gArea);
@@ -224,12 +181,11 @@ function render(forcedStatus) {
     updateTimerDisplay();
 }
 
-// 6. INITIALIZATION
 function startTimer() {
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     if (isInfinite) return;
     window.chessIntervalInstance = setInterval(() => {
-        if (isGameOver) return clearInterval(window.chessIntervalInstance);
+        if (isGameOver) return;
         if (currentTurn === 'white') whiteTime--; else blackTime--;
         updateTimerDisplay();
         if (whiteTime <= 0 || blackTime <= 0) { isGameOver = true; render(whiteTime <= 0 ? "BLACK WINS ON TIME" : "WHITE WINS ON TIME"); }
@@ -260,5 +216,11 @@ function initGameState() {
     boardState = [['♜','♞','♝','♛','♚','♝','♞','♜'],['♟','♟','♟','♟','♟','♟','♟','♟'],...Array(4).fill(null).map(() => Array(8).fill('')),['♙','♙','♙','♙','♙','♙','♙','♙'],['♖','♘','♗','♕','♔','♗','♘','♖']];
     currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false;
     startTimer(); render();
+}
+function formatTime(s) { if (isInfinite) return "∞"; const dS = Math.max(0, s); return `${Math.floor(dS/60)}:${(dS%60).toString().padStart(2,'0')}`; }
+function updateTimerDisplay() {
+    const wT = document.getElementById('timer-white'), bT = document.getElementById('timer-black');
+    if (wT) { wT.textContent = formatTime(whiteTime); wT.className = `timer ${currentTurn === 'white' ? 'active' : ''}`; }
+    if (bT) { bT.textContent = formatTime(blackTime); bT.className = `timer ${currentTurn === 'black' ? 'active' : ''}`; }
 }
 showSetup();

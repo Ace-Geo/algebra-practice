@@ -40,6 +40,13 @@ io.on("connection", (socket) => {
     socket.on("send-move", (data) => {
         socket.to(data.password).emit("receive-move", data);
     });
+
+    socket.on("disconnecting", () => {
+        for (const room of socket.rooms) {
+            const clients = io.sockets.adapter.rooms.get(room);
+            if (clients && clients.size === 1) delete roomSettings[room];
+        }
+    });
 });
 
 http.listen(PORT, () => console.log(`Server running on port ${PORT}`));

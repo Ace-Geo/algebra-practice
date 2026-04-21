@@ -12,7 +12,6 @@ socket.on("player-assignment", (data) => {
     isInfinite = (m === 0);
     whiteName = data.settings.whiteName || "White";
     
-    // Safety check for Black's local name input
     if (myColor === "black") {
         const localInput = document.getElementById('uName');
         blackName = localInput ? localInput.value : "Black";
@@ -142,7 +141,12 @@ function render(forcedStatus) {
         return div;
     };
 
-    gameArea.appendChild(createBar(blackName, 'black'));
+    // Correct Bar Order based on perspective
+    if(myColor === 'black') {
+        gameArea.appendChild(createBar(whiteName, 'white'));
+    } else {
+        gameArea.appendChild(createBar(blackName, 'black'));
+    }
 
     const boardWrap = document.createElement('div'); boardWrap.id = 'board-container';
     const boardEl = document.createElement('div'); boardEl.id = 'board';
@@ -153,8 +157,11 @@ function render(forcedStatus) {
         for(let r=0; r<8; r++) for(let c=0; c<8; c++) if(moveIsLegal(selected.r, selected.c, r, c, p, currentTurn)) hints.push({r,c});
     }
 
-    for(let r=0; r<8; r++) {
-        for(let c=0; c<8; c++) {
+    // Determine loop direction based on player color
+    const range = (myColor === 'black') ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
+
+    for(let r of range) {
+        for(let c of range) {
             const sq = document.createElement('div');
             const piece = boardState[r][c];
             sq.className = `square ${(r+c)%2===0 ? 'white-sq' : 'black-sq'}`;
@@ -181,7 +188,13 @@ function render(forcedStatus) {
         }
     }
     boardWrap.appendChild(boardEl); gameArea.appendChild(boardWrap);
-    gameArea.appendChild(createBar(whiteName, 'white'));
+
+    if(myColor === 'black') {
+        gameArea.appendChild(createBar(blackName, 'black'));
+    } else {
+        gameArea.appendChild(createBar(whiteName, 'white'));
+    }
+
     layout.appendChild(gameArea);
 
     const side = document.createElement('div'); side.id = 'side-panel';
@@ -240,6 +253,4 @@ function showSetup() {
         overlay.remove();
     };
 }
-
-// Make sure the code starts after the page is loaded
 window.onload = showSetup;

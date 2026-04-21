@@ -30,11 +30,13 @@ socket.on("receive-move", (data) => {
 });
 
 socket.on("opponent-resigned", (data) => {
+    if (isGameOver) return; // Prevent outcome change
     isGameOver = true;
     render(`${data.winner.toUpperCase()} WINS BY RESIGNATION`);
 });
 
 socket.on("draw-offered", () => {
+    if (isGameOver) return; // Ignore draw offers if game is over
     const area = document.getElementById('notification-area');
     if (area) {
         area.innerHTML = `<div class="draw-modal">Opponent offers draw<div class="modal-btns">
@@ -45,7 +47,10 @@ socket.on("draw-offered", () => {
 });
 
 socket.on("draw-resolved", (data) => {
-    if (data.accepted) { isGameOver = true; render("DRAW BY AGREEMENT"); }
+    if (data.accepted && !isGameOver) { 
+        isGameOver = true; 
+        render("DRAW BY AGREEMENT"); 
+    }
 });
 
 // --- 2. CHESS LOGIC ---
@@ -119,6 +124,7 @@ function isCheckmate(team) {
 
 // --- 3. ACTIONS ---
 function handleActualMove(from, to, isLocal) {
+    if (isGameOver) return;
     const p = boardState[from.r][from.c];
     const isEP = (p==='♙'||p==='♟') && enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
     if(isEP) boardState[from.r][to.c] = '';
@@ -146,14 +152,19 @@ function handleActualMove(from, to, isLocal) {
 }
 
 function resignGame() {
+    if (isGameOver) return; // BLOCKED IF GAME ENDED
     const win = myColor === 'white' ? 'black' : 'white';
     socket.emit("resign", { password: currentPassword, winner: win });
     isGameOver = true; render(`${win.toUpperCase()} WINS BY RESIGNATION`);
 }
 
-function offerDraw() { socket.emit("offer-draw", { password: currentPassword }); }
+function offerDraw() { 
+    if (isGameOver) return; // BLOCKED IF GAME ENDED
+    socket.emit("offer-draw", { password: currentPassword }); 
+}
 
 function respondToDraw(acc) {
+    if (isGameOver) return;
     socket.emit("draw-response", { password: currentPassword, accepted: acc });
     document.getElementById('notification-area').innerHTML = '';
     if (acc) { isGameOver = true; render("DRAW BY AGREEMENT"); }
@@ -214,9 +225,17 @@ function render(forcedStatus) {
     layout.appendChild(gameArea);
 
     const side = document.createElement('div'); side.id = 'side-panel';
+    
+    // Check if we should disable buttons
+    const btnState = isGameOver ? "disabled" : "";
+
     side.innerHTML = `<div id="status-box"><div id="status-text">${sTxt}</div></div><div id="notification-area"></div>
-        <div class="btn-row"><button class="action-btn" onclick="offerDraw()">Offer Draw</button><button class="action-btn" onclick="resignGame()">Resign</button></div>
+        <div class="btn-row">
+            <button class="action-btn" onclick="offerDraw()" ${btnState}>Offer Draw</button>
+            <button class="action-btn" onclick="resignGame()" ${btnState}>Resign</button>
+        </div>
         <div id="history-container"></div>`;
+    
     const hCont = side.querySelector('#history-container');
     moveHistory.forEach((m, i) => { hCont.innerHTML += `<div class="history-row"><div>${i+1}.</div><div>${m.w}</div><div>${m.b}</div></div>`; });
     layout.appendChild(side);

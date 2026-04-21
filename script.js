@@ -35,17 +35,7 @@ socket.on("opponent-resigned", (data) => {
 });
 
 socket.on("draw-offered", () => {
-    const side = document.getElementById('side-panel');
-    const modal = document.createElement('div');
-    modal.id = 'draw-modal';
-    modal.innerHTML = `
-        Opponent offers a draw.
-        <div class="modal-btns">
-            <button onclick="respondToDraw(true)" style="background:#fff; color:#779556">Accept</button>
-            <button onclick="respondToDraw(false)" style="background:#3c3a37; color:#fff">Decline</button>
-        </div>
-    `;
-    side.prepend(modal);
+    showDrawOffer();
 });
 
 socket.on("draw-resolved", (data) => {
@@ -53,13 +43,11 @@ socket.on("draw-resolved", (data) => {
         isGameOver = true;
         render("GAME DRAWN BY AGREEMENT");
     } else {
-        alert("Draw offer declined.");
+        showStatusMessage("Draw offer declined");
     }
 });
 
-socket.on("error-msg", (msg) => alert(msg));
-
-// --- 2. CORE CHESS LOGIC ---
+// --- 2. LOGIC HELPERS ---
 const isWhite = (char) => ['♖', '♘', '♗', '♕', '♔', '♙'].includes(char);
 const getTeam = (char) => char === '' ? null : (isWhite(char) ? 'white' : 'black');
 const getPieceNotation = (p) => {
@@ -124,22 +112,18 @@ function handleActualMove(from, to, isLocal) {
     const p = boardState[from.r][from.c];
     const isEP = (p==='♙'||p==='♟') && enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
     let castle = null;
-
     if((p==='♔'||p==='♚') && Math.abs(from.c - to.c) === 2) {
         castle = to.c === 6 ? 'short' : 'long';
         const rO = to.c === 6 ? 7 : 0, rN = to.c === 6 ? 5 : 3;
         boardState[to.r][rN] = boardState[to.r][rO]; boardState[to.r][rO] = '';
     }
-
     let note = getNotation(from.r, from.c, to.r, to.c, p, boardState[to.r][to.c], isEP, castle);
     if(isEP) boardState[from.r][to.c] = '';
     hasMoved[`${from.r},${from.c}`] = 1; 
     boardState[to.r][to.c] = p; boardState[from.r][from.c] = '';
     if(p==='♙'&& to.r===0) boardState[to.r][to.c] = '♕'; if(p==='♟'&& to.r===7) boardState[to.r][to.c] = '♛';
     if(isInCheck(currentTurn==='white'?'black':'white', boardState)) note += '+';
-
     if(currentTurn === 'white') moveHistory.push({w: note, b: ''}); else moveHistory[moveHistory.length-1].b = note;
-
     enPassantTarget = (p==='♙'||p==='♟') && Math.abs(from.r - to.r) === 2 ? {r:(from.r+to.r)/2, c: to.c} : null;
     currentTurn = currentTurn === 'white' ? 'black' : 'white';
     selected = null;
@@ -147,6 +131,7 @@ function handleActualMove(from, to, isLocal) {
     render();
 }
 
+// --- NEW UI ACTIONS (No Popups) ---
 function resignGame() {
     if (isGameOver) return;
     const winner = myColor === 'white' ? 'black' : 'white';
@@ -158,16 +143,37 @@ function resignGame() {
 function offerDraw() {
     if (isGameOver) return;
     socket.emit("offer-draw", { password: currentPassword });
-    alert("Draw offer sent.");
+    showStatusMessage("Draw offer sent...");
+}
+
+function showDrawOffer() {
+    const area = document.getElementById('notification-area');
+    if (!area) return;
+    area.innerHTML = `
+        <div class="draw-modal">
+            Opponent offers a draw
+            <div class="modal-btns">
+                <button class="accept-btn" onclick="respondToDraw(true)">Accept</button>
+                <button class="decline-btn" onclick="respondToDraw(false)">Decline</button>
+            </div>
+        </div>
+    `;
 }
 
 function respondToDraw(accepted) {
     socket.emit("draw-response", { password: currentPassword, accepted: accepted });
-    document.getElementById('draw-modal')?.remove();
+    document.getElementById('notification-area').innerHTML = '';
     if (accepted) {
         isGameOver = true;
         render("GAME DRAWN BY AGREEMENT");
     }
+}
+
+function showStatusMessage(msg) {
+    const area = document.getElementById('notification-area');
+    if (!area) return;
+    area.innerHTML = `<div class="status-msg">${msg}</div>`;
+    setTimeout(() => { area.innerHTML = ''; }, 3000);
 }
 
 // --- 4. RENDERER ---
@@ -238,6 +244,7 @@ function render(forcedStatus) {
     const side = document.createElement('div'); side.id = 'side-panel';
     side.innerHTML = `
         <div id="status-box"><div id="status-text">${sTxt}</div></div>
+        <div id="notification-area"></div>
         <div class="btn-row">
             <button class="action-btn" onclick="offerDraw()">Offer Draw</button>
             <button class="action-btn" onclick="resignGame()">Resign</button>
@@ -288,7 +295,7 @@ function showSetup() {
     document.body.appendChild(overlay);
     document.getElementById('startBtn').onclick = () => {
         currentPassword = document.getElementById('roomPass').value;
-        if(!currentPassword) return alert("Enter password");
+        if(!currentPassword) return;
         socket.emit("join-room", { password: currentPassword, name: document.getElementById('uName').value, mins: document.getElementById('tMin').value });
         overlay.remove();
     };

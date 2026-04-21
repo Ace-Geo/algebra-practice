@@ -11,13 +11,10 @@ socket.on("player-assignment", (data) => {
     whiteTime = m * 60; blackTime = whiteTime;
     isInfinite = (m === 0);
     whiteName = data.settings.whiteName || "White";
-    
     if (myColor === "black") {
         const localInput = document.getElementById('uName');
         blackName = localInput ? localInput.value : "Black";
-    } else {
-        blackName = "Waiting...";
-    }
+    } else { blackName = "Waiting..."; }
     initGameState();
 });
 
@@ -32,9 +29,37 @@ socket.on("receive-move", (data) => {
     handleActualMove(data.move.from, data.move.to, false);
 });
 
+socket.on("opponent-resigned", (data) => {
+    isGameOver = true;
+    render(`${data.winner.toUpperCase()} WINS BY RESIGNATION`);
+});
+
+socket.on("draw-offered", () => {
+    const side = document.getElementById('side-panel');
+    const modal = document.createElement('div');
+    modal.id = 'draw-modal';
+    modal.innerHTML = `
+        Opponent offers a draw.
+        <div class="modal-btns">
+            <button onclick="respondToDraw(true)" style="background:#fff; color:#779556">Accept</button>
+            <button onclick="respondToDraw(false)" style="background:#3c3a37; color:#fff">Decline</button>
+        </div>
+    `;
+    side.prepend(modal);
+});
+
+socket.on("draw-resolved", (data) => {
+    if (data.accepted) {
+        isGameOver = true;
+        render("GAME DRAWN BY AGREEMENT");
+    } else {
+        alert("Draw offer declined.");
+    }
+});
+
 socket.on("error-msg", (msg) => alert(msg));
 
-// --- 2. LOGIC HELPERS ---
+// --- 2. CORE CHESS LOGIC ---
 const isWhite = (char) => ['♖', '♘', '♗', '♕', '♔', '♙'].includes(char);
 const getTeam = (char) => char === '' ? null : (isWhite(char) ? 'white' : 'black');
 const getPieceNotation = (p) => {
@@ -42,7 +67,6 @@ const getPieceNotation = (p) => {
     return map[p] || '';
 };
 
-// --- 3. CORE CHESS LOGIC ---
 function validateMoveMechanics(fR, fC, tR, tC, p, tar, b) {
     const dr = tR-fR, dc = tC-fC, adr = Math.abs(dr), adc = Math.abs(dc), team = getTeam(p);
     if (tar !== '' && getTeam(tar) === team) return false;
@@ -95,7 +119,7 @@ function getNotation(fR, fC, tR, tC, piece, target, isEP, castle) {
     return p + cap + files[tC] + rows[tR];
 }
 
-// --- 4. GAME ACTIONS ---
+// --- 3. GAME ACTIONS ---
 function handleActualMove(from, to, isLocal) {
     const p = boardState[from.r][from.c];
     const isEP = (p==='♙'||p==='♟') && enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
@@ -123,7 +147,30 @@ function handleActualMove(from, to, isLocal) {
     render();
 }
 
-// --- 5. RENDERER ---
+function resignGame() {
+    if (isGameOver) return;
+    const winner = myColor === 'white' ? 'black' : 'white';
+    socket.emit("resign", { password: currentPassword, winner: winner });
+    isGameOver = true;
+    render(`${winner.toUpperCase()} WINS BY RESIGNATION`);
+}
+
+function offerDraw() {
+    if (isGameOver) return;
+    socket.emit("offer-draw", { password: currentPassword });
+    alert("Draw offer sent.");
+}
+
+function respondToDraw(accepted) {
+    socket.emit("draw-response", { password: currentPassword, accepted: accepted });
+    document.getElementById('draw-modal')?.remove();
+    if (accepted) {
+        isGameOver = true;
+        render("GAME DRAWN BY AGREEMENT");
+    }
+}
+
+// --- 4. RENDERER ---
 function render(forcedStatus) {
     const layout = document.getElementById('main-layout');
     if (!layout) return;
@@ -141,12 +188,8 @@ function render(forcedStatus) {
         return div;
     };
 
-    // Correct Bar Order based on perspective
-    if(myColor === 'black') {
-        gameArea.appendChild(createBar(whiteName, 'white'));
-    } else {
-        gameArea.appendChild(createBar(blackName, 'black'));
-    }
+    if(myColor === 'black') gameArea.appendChild(createBar(whiteName, 'white'));
+    else gameArea.appendChild(createBar(blackName, 'black'));
 
     const boardWrap = document.createElement('div'); boardWrap.id = 'board-container';
     const boardEl = document.createElement('div'); boardEl.id = 'board';
@@ -157,9 +200,7 @@ function render(forcedStatus) {
         for(let r=0; r<8; r++) for(let c=0; c<8; c++) if(moveIsLegal(selected.r, selected.c, r, c, p, currentTurn)) hints.push({r,c});
     }
 
-    // Determine loop direction based on player color
     const range = (myColor === 'black') ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
-
     for(let r of range) {
         for(let c of range) {
             const sq = document.createElement('div');
@@ -189,16 +230,20 @@ function render(forcedStatus) {
     }
     boardWrap.appendChild(boardEl); gameArea.appendChild(boardWrap);
 
-    if(myColor === 'black') {
-        gameArea.appendChild(createBar(blackName, 'black'));
-    } else {
-        gameArea.appendChild(createBar(whiteName, 'white'));
-    }
+    if(myColor === 'black') gameArea.appendChild(createBar(blackName, 'black'));
+    else gameArea.appendChild(createBar(whiteName, 'white'));
 
     layout.appendChild(gameArea);
 
     const side = document.createElement('div'); side.id = 'side-panel';
-    side.innerHTML = `<div id="status-box"><div id="status-text">${sTxt}</div></div><div id="history-container"></div>`;
+    side.innerHTML = `
+        <div id="status-box"><div id="status-text">${sTxt}</div></div>
+        <div class="btn-row">
+            <button class="action-btn" onclick="offerDraw()">Offer Draw</button>
+            <button class="action-btn" onclick="resignGame()">Resign</button>
+        </div>
+        <div id="history-container"></div>
+    `;
     const hCont = side.querySelector('#history-container');
     moveHistory.forEach((m, i) => {
         hCont.innerHTML += `<div class="history-row"><div class="move-num">${i+1}.</div><div class="move-val">${m.w}</div><div class="move-val">${m.b}</div></div>`;
@@ -207,14 +252,9 @@ function render(forcedStatus) {
     updateTimerDisplay();
 }
 
-// --- 6. INIT ---
+// --- 5. INIT & TIMERS ---
 function initGameState() {
-    boardState = [
-        ['♜','♞','♝','♛','♚','♝','♞','♜'],['♟','♟','♟','♟','♟','♟','♟','♟'],
-        ['','','','','','','',''],['','','','','','','',''],
-        ['','','','','','','',''],['','','','','','','',''],
-        ['♙','♙','♙','♙','♙','♙','♙','♙'],['♖','♘','♗','♕','♔','♗','♘','♖']
-    ];
+    boardState = [['♜','♞','♝','♛','♚','♝','♞','♜'],['♟','♟','♟','♟','♟','♟','♟','♟'],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['♙','♙','♙','♙','♙','♙','♙','♙'],['♖','♘','♗','♕','♔','♗','♘','♖']];
     currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false; selected = null;
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     if (!isInfinite) {

@@ -1,4 +1,5 @@
 # Algebra Practice
+Play here: ace-geo.github.io/algebra_practice/
 How to play:
   Enter a Room Password (this acts as a unique lobby code).
   Enter your Username.

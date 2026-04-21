@@ -1,9 +1,15 @@
-// 1. Connection
+// 1. Connection Logic
 const socket = io("https://algebra-but-better.onrender.com");
 const roomId = "chess-global-room";
 socket.emit("join-room", roomId);
 
-// 2. Game Variables (From your script)
+// Listen for moves from your friend
+socket.on("receive-move", (data) => {
+    // Execute the move but don't send it back (isLocal = false)
+    handleActualMove(data.from, data.to, false);
+});
+
+// 2. Your Original Console Logic Variables
 const whiteChars = ['♖', '♘', '♗', '♕', '♔', '♙'];
 const isWhite = (char) => whiteChars.includes(char);
 const getTeam = (char) => char === '' ? null : (isWhite(char) ? 'white' : 'black');
@@ -16,55 +22,54 @@ let boardState, currentTurn, hasMoved, enPassantTarget, selected, isGameOver, is
 let whiteName, blackName, whiteTime, blackTime, moveHistory, increment;
 const mainLayout = document.getElementById('main-layout');
 
-// 3. Multiplayer Listener
-socket.on("receive-move", (data) => {
-    // When a move comes from the server, we execute it but DON'T send it back
-    applyMoveLogic(data.from.r, data.from.c, data.to.r, data.to.c, false);
-});
-
-// 4. Move Execution Logic
-function applyMoveLogic(fR, fC, tR, tC, isLocal) {
-    const p = boardState[fR][fC];
-    let isEP = (p==='♙'||p==='♟') && enPassantTarget?.r === tR && enPassantTarget?.c === tC;
-    let castle = null;
-
-    if((p==='♔'||p==='♚') && Math.abs(fC - tC) === 2) {
-        castle = tC === 6 ? 'short' : 'long';
-        const rO = tC === 6 ? 7 : 0, rN = tC === 6 ? 5 : 3;
-        boardState[fR][rN] = boardState[fR][rO]; boardState[fR][rO] = '';
-    }
-
-    let note = getNotation(fR, fC, tR, tC, p, boardState[tR][tC], isEP, castle);
-    if(isEP) boardState[fR][tC] = '';
-    hasMoved[`${fR},${fC}`] = 1; 
-    boardState[tR][tC] = p; 
-    boardState[fR][fC] = '';
-
-    if(p==='♙'&& tR===0) boardState[tR][tC] = '♕'; 
-    if(p==='♟'&& tR===7) boardState[tR][tC] = '♛';
-    if(isInCheck(currentTurn==='white'?'black':'white', boardState)) note += '+';
-
-    if(currentTurn === 'white') {
-        moveHistory.push({w: note, b: ''});
-        if(!isInfinite) whiteTime += increment;
-    } else {
-        moveHistory[moveHistory.length-1].b = note;
-        if(!isInfinite) blackTime += increment;
-    }
-
-    enPassantTarget = (p==='♙'||p==='♟') && Math.abs(fR - tR) === 2 ? {r:(fR+tR)/2, c: tC} : null;
-    currentTurn = currentTurn === 'white' ? 'black' : 'white';
-    selected = null;
-
-    // If I made the move, tell the server
-    if (isLocal) {
-        socket.emit("send-move", { roomId, move: { from: {r:fR, c:fC}, to: {r:tR, c:tC} } });
-    }
-
-    render();
+// 3. Game Engine Functions (Required for dots and notation)
+function formatTime(s) {
+    if (isInfinite) return "";
+    return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`;
 }
 
-// 5. Game Engine Functions (Keep these exactly as you had them)
+function killClocks() {
+    if (window.chessIntervalInstance) {
+        clearInterval(window.chessIntervalInstance);
+        window.chessIntervalInstance = null;
+    }
+}
+
+function startTimer() {
+    killClocks();
+    if (isInfinite) return;
+    window.chessIntervalInstance = setInterval(() => {
+        if (isGameOver) { killClocks(); return; }
+        if (currentTurn === 'white') { 
+            whiteTime--; 
+            if (whiteTime <= 0) endGame("BLACK WINS ON TIME"); 
+        } else { 
+            blackTime--; 
+            if (blackTime <= 0) endGame("WHITE WINS ON TIME"); 
+        }
+        updateTimerDisplay();
+    }, 1000);
+}
+
+function updateTimerDisplay() {
+    const wT = document.getElementById('timer-white');
+    const bT = document.getElementById('timer-black');
+    if (wT) {
+        wT.textContent = formatTime(whiteTime);
+        wT.className = `timer ${currentTurn === 'white' ? 'active' : ''} ${!isInfinite && whiteTime < 30 ? 'low-time' : ''} ${isInfinite ? 'hidden' : ''}`;
+    }
+    if (bT) {
+        bT.textContent = formatTime(blackTime);
+        bT.className = `timer ${currentTurn === 'black' ? 'active' : ''} ${!isInfinite && blackTime < 30 ? 'low-time' : ''} ${isInfinite ? 'hidden' : ''}`;
+    }
+}
+
+function endGame(msg) {
+    isGameOver = true;
+    killClocks();
+    render(msg);
+}
+
 function getNotation(fR, fC, tR, tC, piece, target, isEP, castle) {
     if (castle) return castle === 'short' ? 'O-O' : 'O-O-O';
     const files = ['a','b','c','d','e','f','g','h'];
@@ -116,6 +121,7 @@ function isInCheck(team, b) {
 function moveIsLegal(fR, fC, tR, tC, p, team) {
     if (!validateMoveMechanics(fR, fC, tR, tC, p, boardState[tR][tC], boardState)) return false;
     const temp = boardState.map(r => [...r]); temp[tR][tC] = p; temp[fR][fC] = '';
+    if ((p==='♙'||p==='♟') && enPassantTarget?.r === tR && enPassantTarget?.c === tC) temp[fR][tC] = '';
     return !isInCheck(team, temp);
 }
 
@@ -125,49 +131,158 @@ function canMove(team) {
     return false;
 }
 
-// 6. UI Rendering (Modified to use your existing HTML structure)
+// 4. THE ACTION HANDLER (Multiplayer Integrated)
+function handleActualMove(from, to, isLocal) {
+    const p = boardState[from.r][from.c];
+    let isEP = (p==='♙'||p==='♟') && enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
+    let castle = null;
+
+    if((p==='♔'||p==='♚') && Math.abs(from.c - to.c) === 2) {
+        castle = to.c === 6 ? 'short' : 'long';
+        const rO = to.c === 6 ? 7 : 0, rN = to.c === 6 ? 5 : 3;
+        boardState[to.r][rN] = boardState[to.r][rO]; boardState[to.r][rO] = '';
+    }
+
+    let note = getNotation(from.r, from.c, to.r, to.c, p, boardState[to.r][to.c], isEP, castle);
+    if(isEP) boardState[from.r][to.c] = '';
+    hasMoved[`${from.r},${from.c}`] = 1; 
+    boardState[to.r][to.c] = p; 
+    boardState[from.r][from.c] = '';
+
+    if(p==='♙'&& to.r===0) boardState[to.r][to.c] = '♕'; 
+    if(p==='♟'&& to.r===7) boardState[to.r][to.c] = '♛';
+    if(isInCheck(currentTurn==='white'?'black':'white', boardState)) note += '+';
+
+    if(currentTurn === 'white') {
+        moveHistory.push({w: note, b: ''});
+        if(!isInfinite) whiteTime += increment;
+    } else {
+        moveHistory[moveHistory.length-1].b = note;
+        if(!isInfinite) blackTime += increment;
+    }
+
+    enPassantTarget = (p==='♙'||p==='♟') && Math.abs(from.r - to.r) === 2 ? {r:(from.r+to.r)/2, c: to.c} : null;
+    currentTurn = currentTurn === 'white' ? 'black' : 'white';
+    selected = null;
+
+    if (isLocal) {
+        socket.emit("send-move", { roomId, move: { from, to } });
+    }
+    render();
+}
+
+// 5. UI Rendering (Including Dots!)
 function render(forcedStatus) {
-    mainLayout.innerHTML = ''; // This clears the black box!
+    mainLayout.replaceChildren();
     const check = isInCheck(currentTurn, boardState);
     const playable = canMove(currentTurn);
     let sTxt = forcedStatus || `${currentTurn.toUpperCase()}'S TURN ${check?'(CHECK!)':''}`;
-    if (!playable && !forcedStatus) { isGameOver = true; sTxt = check ? `MATE!` : "STALEMATE"; }
+    if (!playable && !forcedStatus) { isGameOver = true; killClocks(); sTxt = check ? `CHECKMATE!` : "STALEMATE"; }
 
     const gArea = document.createElement('div'); gArea.id = 'game-area';
+    
+    // Players and Board
+    const createBar = (name, id) => {
+        const div = document.createElement('div'); div.className = 'player-bar';
+        div.innerHTML = `<span class="player-name">${name}</span><div id="timer-${id}" class="timer"></div>`;
+        return div;
+    };
+    gArea.appendChild(createBar(blackName, 'black'));
+
     const bWrap = document.createElement('div'); bWrap.id = 'board-container';
     const bEl = document.createElement('div'); bEl.id = 'board';
+
+    let possibleMoves = [];
+    if(selected && !isGameOver) {
+        const p = boardState[selected.r][selected.c];
+        for(let r=0; r<8; r++) for(let c=0; c<8; c++) {
+            if(moveIsLegal(selected.r, selected.c, r, c, p, currentTurn)) possibleMoves.push({r,c});
+        }
+    }
 
     for(let r=0; r<8; r++) for(let c=0; c<8; c++) {
         const sq = document.createElement('div'); const char = boardState[r][c];
         sq.className = `square ${(r+c)%2===0?'white-sq':'black-sq'}`;
         if(selected?.r===r && selected?.c===c) sq.classList.add('selected');
-        if(char) {
-            const sp = document.createElement('span'); sp.className = `piece ${isWhite(char)?'w-piece':'b-piece'}`; sp.textContent = char; sq.appendChild(sp);
+        if(check && (char==='♔'||char==='♚') && getTeam(char)===currentTurn) sq.classList.add('in-check');
+
+        // Draw the Dots/Hints
+        if(possibleMoves.some(m => m.r===r && m.c===c)) {
+            const h = document.createElement('div');
+            h.className = char === '' ? 'hint-dot' : 'hint-capture';
+            sq.appendChild(h);
         }
+
+        if(char) {
+            const sp = document.createElement('span'); 
+            sp.className = `piece ${isWhite(char)?'w-piece':'b-piece'}`; 
+            sp.textContent = char; 
+            sq.appendChild(sp);
+        }
+
         sq.onclick = () => {
             if(isGameOver) return;
             if(selected) {
                 if(moveIsLegal(selected.r, selected.c, r, c, boardState[selected.r][selected.c], currentTurn)) {
-                    applyMoveLogic(selected.r, selected.c, r, c, true);
-                } else { selected = getTeam(char) === currentTurn ? {r,c} : null; render(); }
-            } else if(getTeam(char) === currentTurn) { selected = {r,c}; render(); }
+                    handleActualMove(selected, {r, c}, true);
+                } else { 
+                    selected = getTeam(char) === currentTurn ? {r,c} : null; 
+                    render(); 
+                }
+            } else if(getTeam(char) === currentTurn) { 
+                selected = {r,c}; 
+                render(); 
+            }
         };
         bEl.appendChild(sq);
     }
     bWrap.appendChild(bEl); gArea.appendChild(bWrap);
+    gArea.appendChild(createBar(whiteName, 'white'));
     mainLayout.appendChild(gArea);
-    
-    // Add Side Panel (History/Status)
+
+    // Side Panel (History)
     const side = document.createElement('div'); side.id = 'side-panel';
-    side.innerHTML = `<div id="status-box"><div id="status-text">${sTxt}</div></div>`;
+    side.innerHTML = `<div id="status-box"><div id="status-text">${sTxt}</div></div><div id="history-container"></div>`;
+    const hCont = side.querySelector('#history-container');
+    moveHistory.forEach((m, i) => {
+        hCont.innerHTML += `<div class="history-row"><div class="move-num">${i+1}.</div><div class="move-val">${m.w}</div><div class="move-val">${m.b}</div></div>`;
+    });
     mainLayout.appendChild(side);
+    updateTimerDisplay();
 }
 
-// 7. Setup & Start
+// 6. Setup Modal (This is what you were missing!)
+function showSetup() {
+    const overlay = document.createElement('div');
+    overlay.id = 'setup-overlay';
+    overlay.innerHTML = `
+        <div class="setup-card">
+            <h2>Game Setup</h2>
+            <div class="input-group"><label>White Player</label><input id="wName" value="White"></div>
+            <div class="input-group"><label>Black Player</label><input id="bName" value="Black"></div>
+            <div class="input-group"><label>Minutes</label><input type="number" id="tMin" value="10"></div>
+            <div class="input-group"><label>Increment (sec)</label><input type="number" id="tInc" value="0"></div>
+            <button class="start-btn" id="startBtn">START MATCH</button>
+        </div>`;
+    document.body.appendChild(overlay);
+    document.getElementById('startBtn').onclick = () => {
+        whiteName = document.getElementById('wName').value;
+        blackName = document.getElementById('bName').value;
+        let m = parseInt(document.getElementById('tMin').value);
+        increment = parseInt(document.getElementById('tInc').value);
+        whiteTime = m * 60; blackTime = whiteTime;
+        isInfinite = (m === 0);
+        overlay.remove();
+        initGameState();
+    };
+}
+
 function initGameState() {
     boardState = [['♜','♞','♝','♛','♚','♝','♞','♜'],['♟','♟','♟','♟','♟','♟','♟','♟'],...Array(4).fill(null).map(() => Array(8).fill('')),['♙','♙','♙','♙','♙','♙','♙','♙'],['♖','♘','♗','♕','♔','♗','♘','♖']];
     currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false;
+    startTimer();
     render();
 }
 
-initGameState();
+// Start with the setup screen
+showSetup();

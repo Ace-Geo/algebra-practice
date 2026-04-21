@@ -15,22 +15,12 @@ io.on("connection", (socket) => {
 
         if (numClients === 0) {
             socket.join(password);
-            roomSettings[password] = { 
-                mins: mins || 10, 
-                whiteName: safeName 
-            };
-            socket.emit("player-assignment", { 
-                color: "white", 
-                settings: roomSettings[password] 
-            });
+            roomSettings[password] = { mins: mins || 10, whiteName: safeName };
+            socket.emit("player-assignment", { color: "white", settings: roomSettings[password] });
         } else if (numClients === 1) {
             socket.join(password);
             const settings = roomSettings[password];
-            socket.emit("player-assignment", { 
-                color: "black", 
-                settings: settings, 
-                blackName: safeName 
-            });
+            socket.emit("player-assignment", { color: "black", settings: settings });
             socket.to(password).emit("opponent-joined", { blackName: safeName });
         } else {
             socket.emit("error-msg", "Room is full!");
@@ -42,10 +32,10 @@ io.on("connection", (socket) => {
     });
 
     socket.on("disconnecting", () => {
-        for (const room of socket.rooms) {
+        socket.rooms.forEach(room => {
             const clients = io.sockets.adapter.rooms.get(room);
             if (clients && clients.size === 1) delete roomSettings[room];
-        }
+        });
     });
 });
 

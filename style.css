@@ -132,20 +132,7 @@ body {
     padding: 8px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: bold; 
 }
 
-.action-btn:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-}
-
-.hidden { display: none !important; }
-
-.draw-modal { 
-    background: #4b4845; border-left: 4px solid #779556; 
-    padding: 10px; border-radius: 4px; font-size: 12px; 
-}
-
-.modal-btns { display: flex; gap: 5px; margin-top: 8px; }
-.modal-btns button { flex: 1; padding: 5px; border: none; border-radius: 3px; cursor: pointer; }
+.action-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
 #history-container { 
     flex-grow: 1; overflow-y: auto; background: #1a1a1a; 
@@ -156,3 +143,11 @@ body {
     display: grid; grid-template-columns: 30px 1fr 1fr; 
     font-family: monospace; font-size: 13px; padding: 4px 0; 
 }
+
+.draw-modal { 
+    background: #4b4845; border-left: 4px solid #779556; 
+    padding: 10px; border-radius: 4px; font-size: 12px; 
+}
+
+.modal-btns { display: flex; gap: 5px; margin-top: 8px; }
+.modal-btns button { flex: 1; padding: 5px; border: none; border-radius: 3px; cursor: pointer; }

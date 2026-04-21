@@ -1,5 +1,5 @@
 # Algebra Practice
-How to play:
+How to play:\n
   Enter a Room Password (this acts as a unique lobby code).
   Enter your Username.
   If you are the first player, you will be assigned White. Set the timer duration.

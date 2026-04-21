@@ -2,11 +2,16 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Multiplayer Chess</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
-    <div id="main-layout"></div> <script src="script.js"></script>
+    <div id="game-container">
+        <h2 id="status">White's Turn</h2>
+        <div id="main-layout"></div>
+    </div>
+    <script src="script.js"></script>
 </body>
 </html>

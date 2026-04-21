@@ -11,7 +11,6 @@ io.on("connection", (socket) => {
         const { password, name, mins, secs, inc, preferredColor } = data;
         socket.join(password);
         
-        // Determine actual creator color
         let creatorColor = preferredColor;
         if (preferredColor === 'random') {
             creatorColor = Math.random() > 0.5 ? 'white' : 'black';
@@ -43,7 +42,6 @@ io.on("connection", (socket) => {
             return socket.emit("error-msg", "Room is full!");
         }
 
-        // Send settings to joiner for confirmation
         socket.emit("confirm-settings", {
             settings: settings,
             creatorName: settings.whiteName || settings.blackName
@@ -57,24 +55,20 @@ io.on("connection", (socket) => {
 
         socket.join(password);
         
-        // Assign the remaining color to the joiner
         const joinerColor = settings.creatorColor === 'white' ? 'black' : 'white';
         if (joinerColor === 'white') settings.whiteName = name;
         else settings.blackName = name;
 
-        // Start game for both
         io.to(password).emit("game-start", {
             settings: settings,
             whiteName: settings.whiteName,
             blackName: settings.blackName
         });
         
-        // Tell each socket their specific color
         socket.emit("assign-color", joinerColor);
         io.to(settings.creatorId).emit("assign-color", settings.creatorColor);
     });
 
-    // Default move/resign/draw handlers...
     socket.on("send-move", (data) => socket.to(data.password).emit("receive-move", data));
     socket.on("resign", (data) => socket.to(data.password).emit("opponent-resigned", { winner: data.winner }));
     socket.on("offer-draw", (data) => socket.to(data.password).emit("draw-offered"));

@@ -35,19 +35,20 @@ socket.on("opponent-resigned", (data) => {
 });
 
 socket.on("draw-offered", () => {
-    showDrawOffer();
-});
-
-socket.on("draw-resolved", (data) => {
-    if (data.accepted) {
-        isGameOver = true;
-        render("GAME DRAWN BY AGREEMENT");
-    } else {
-        showStatusMessage("Draw offer declined");
+    const area = document.getElementById('notification-area');
+    if (area) {
+        area.innerHTML = `<div class="draw-modal">Opponent offers draw<div class="modal-btns">
+            <button onclick="respondToDraw(true)" style="background:#779556;color:#fff">Accept</button>
+            <button onclick="respondToDraw(false)" style="background:#312e2b;color:#aaa">Decline</button>
+        </div></div>`;
     }
 });
 
-// --- 2. LOGIC HELPERS ---
+socket.on("draw-resolved", (data) => {
+    if (data.accepted) { isGameOver = true; render("DRAW BY AGREEMENT"); }
+});
+
+// --- 2. CHESS LOGIC ---
 const isWhite = (char) => ['♖', '♘', '♗', '♕', '♔', '♙'].includes(char);
 const getTeam = (char) => char === '' ? null : (isWhite(char) ? 'white' : 'black');
 const getPieceNotation = (p) => {
@@ -99,31 +100,44 @@ function moveIsLegal(fR, fC, tR, tC, p, team) {
     return !isInCheck(team, temp);
 }
 
-function getNotation(fR, fC, tR, tC, piece, target, isEP, castle) {
-    if (castle) return castle === 'short' ? 'O-O' : 'O-O-O';
-    const files = ['a','b','c','d','e','f','g','h'], rows = ['8','7','6','5','4','3','2','1'];
-    let p = getPieceNotation(piece), cap = (target !== '' || isEP) ? 'x' : '';
-    if (p === '' && cap) p = files[fC]; 
-    return p + cap + files[tC] + rows[tR];
+function isCheckmate(team) {
+    if (!isInCheck(team, boardState)) return false;
+    for (let r=0; r<8; r++) {
+        for (let c=0; c<8; c++) {
+            const p = boardState[r][c];
+            if (p !== '' && getTeam(p) === team) {
+                for (let tr=0; tr<8; tr++) {
+                    for (let tc=0; tc<8; tc++) {
+                        if (moveIsLegal(r, c, tr, tc, p, team)) return false;
+                    }
+                }
+            }
+        }
+    }
+    return true;
 }
 
-// --- 3. GAME ACTIONS ---
+// --- 3. ACTIONS ---
 function handleActualMove(from, to, isLocal) {
     const p = boardState[from.r][from.c];
     const isEP = (p==='♙'||p==='♟') && enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
+    if(isEP) boardState[from.r][to.c] = '';
+    
     let castle = null;
     if((p==='♔'||p==='♚') && Math.abs(from.c - to.c) === 2) {
         castle = to.c === 6 ? 'short' : 'long';
         const rO = to.c === 6 ? 7 : 0, rN = to.c === 6 ? 5 : 3;
         boardState[to.r][rN] = boardState[to.r][rO]; boardState[to.r][rO] = '';
     }
-    let note = getNotation(from.r, from.c, to.r, to.c, p, boardState[to.r][to.c], isEP, castle);
-    if(isEP) boardState[from.r][to.c] = '';
+
+    const files = ['a','b','c','d','e','f','g','h'], rows = ['8','7','6','5','4','3','2','1'];
+    let note = castle ? (castle === 'short' ? 'O-O' : 'O-O-O') : (getPieceNotation(p) || (boardState[to.r][to.c]!==''||isEP ? files[from.c] : '')) + (boardState[to.r][to.c]!==''||isEP ? 'x' : '') + files[to.c] + rows[to.r];
+    
     hasMoved[`${from.r},${from.c}`] = 1; 
     boardState[to.r][to.c] = p; boardState[from.r][from.c] = '';
     if(p==='♙'&& to.r===0) boardState[to.r][to.c] = '♕'; if(p==='♟'&& to.r===7) boardState[to.r][to.c] = '♛';
-    if(isInCheck(currentTurn==='white'?'black':'white', boardState)) note += '+';
-    if(currentTurn === 'white') moveHistory.push({w: note, b: ''}); else moveHistory[moveHistory.length-1].b = note;
+    
+    if (currentTurn === 'white') moveHistory.push({w: note, b: ''}); else moveHistory[moveHistory.length-1].b = note;
     enPassantTarget = (p==='♙'||p==='♟') && Math.abs(from.r - to.r) === 2 ? {r:(from.r+to.r)/2, c: to.c} : null;
     currentTurn = currentTurn === 'white' ? 'black' : 'white';
     selected = null;
@@ -131,49 +145,18 @@ function handleActualMove(from, to, isLocal) {
     render();
 }
 
-// --- NEW UI ACTIONS (No Popups) ---
 function resignGame() {
-    if (isGameOver) return;
-    const winner = myColor === 'white' ? 'black' : 'white';
-    socket.emit("resign", { password: currentPassword, winner: winner });
-    isGameOver = true;
-    render(`${winner.toUpperCase()} WINS BY RESIGNATION`);
+    const win = myColor === 'white' ? 'black' : 'white';
+    socket.emit("resign", { password: currentPassword, winner: win });
+    isGameOver = true; render(`${win.toUpperCase()} WINS BY RESIGNATION`);
 }
 
-function offerDraw() {
-    if (isGameOver) return;
-    socket.emit("offer-draw", { password: currentPassword });
-    showStatusMessage("Draw offer sent...");
-}
+function offerDraw() { socket.emit("offer-draw", { password: currentPassword }); }
 
-function showDrawOffer() {
-    const area = document.getElementById('notification-area');
-    if (!area) return;
-    area.innerHTML = `
-        <div class="draw-modal">
-            Opponent offers a draw
-            <div class="modal-btns">
-                <button class="accept-btn" onclick="respondToDraw(true)">Accept</button>
-                <button class="decline-btn" onclick="respondToDraw(false)">Decline</button>
-            </div>
-        </div>
-    `;
-}
-
-function respondToDraw(accepted) {
-    socket.emit("draw-response", { password: currentPassword, accepted: accepted });
+function respondToDraw(acc) {
+    socket.emit("draw-response", { password: currentPassword, accepted: acc });
     document.getElementById('notification-area').innerHTML = '';
-    if (accepted) {
-        isGameOver = true;
-        render("GAME DRAWN BY AGREEMENT");
-    }
-}
-
-function showStatusMessage(msg) {
-    const area = document.getElementById('notification-area');
-    if (!area) return;
-    area.innerHTML = `<div class="status-msg">${msg}</div>`;
-    setTimeout(() => { area.innerHTML = ''; }, 3000);
+    if (acc) { isGameOver = true; render("DRAW BY AGREEMENT"); }
 }
 
 // --- 4. RENDERER ---
@@ -183,89 +166,70 @@ function render(forcedStatus) {
     layout.replaceChildren();
 
     const check = isInCheck(currentTurn, boardState);
-    const sTxt = forcedStatus || `${currentTurn.toUpperCase()}'S TURN ${check?'(CHECK!)':''}`;
+    const checkmate = isCheckmate(currentTurn);
+    if (checkmate) isGameOver = true;
 
-    const gameArea = document.createElement('div');
-    gameArea.id = 'game-area';
+    let sTxt = forcedStatus || (checkmate ? `CHECKMATE! ${currentTurn==='white'?'BLACK':'WHITE'} WINS` : `${currentTurn.toUpperCase()}'S TURN ${check?'(CHECK!)':''}`);
 
+    const gameArea = document.createElement('div'); gameArea.id = 'game-area';
     const createBar = (name, id) => {
         const div = document.createElement('div'); div.className = 'player-bar';
-        div.innerHTML = `<span class="player-name">${name} ${myColor === id ? '(YOU)' : ''}</span><div id="timer-${id}" class="timer"></div>`;
+        div.innerHTML = `<span>${name}</span><div id="timer-${id}" class="timer"></div>`;
         return div;
     };
 
     if(myColor === 'black') gameArea.appendChild(createBar(whiteName, 'white'));
     else gameArea.appendChild(createBar(blackName, 'black'));
 
-    const boardWrap = document.createElement('div'); boardWrap.id = 'board-container';
     const boardEl = document.createElement('div'); boardEl.id = 'board';
-    
-    let hints = [];
-    if(selected && !isGameOver) {
-        const p = boardState[selected.r][selected.c];
-        for(let r=0; r<8; r++) for(let c=0; c<8; c++) if(moveIsLegal(selected.r, selected.c, r, c, p, currentTurn)) hints.push({r,c});
-    }
-
     const range = (myColor === 'black') ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
+    
     for(let r of range) {
         for(let c of range) {
             const sq = document.createElement('div');
             const piece = boardState[r][c];
             sq.className = `square ${(r+c)%2===0 ? 'white-sq' : 'black-sq'}`;
-            if(selected?.r===r && selected?.c===c) sq.classList.add('selected');
-            if(hints.some(h => h.r===r && h.c===c)) {
-                const dot = document.createElement('div');
-                dot.className = piece === '' ? 'hint-dot' : 'hint-capture';
-                sq.appendChild(dot);
+            if ((piece==='♔'||piece==='♚') && getTeam(piece)===currentTurn && check) sq.classList.add('check-highlight');
+            if (selected?.r===r && selected?.c===c) sq.classList.add('selected');
+            
+            if (selected && !isGameOver && moveIsLegal(selected.r, selected.c, r, c, boardState[selected.r][selected.c], currentTurn)) {
+                const d = document.createElement('div'); d.className = piece===''?'hint-dot':'hint-capture'; sq.appendChild(d);
             }
+
             if(piece) {
-                const sp = document.createElement('span');
-                sp.className = `piece ${isWhite(piece)?'w-piece':'b-piece'}`;
-                sp.textContent = piece;
-                sq.appendChild(sp);
+                const sp = document.createElement('span'); sp.className = `piece ${isWhite(piece)?'w-piece':'b-piece'}`;
+                sp.textContent = piece; sq.appendChild(sp);
             }
             sq.onclick = () => {
                 if(isGameOver || currentTurn !== myColor) return;
-                if(selected) {
-                    if(moveIsLegal(selected.r, selected.c, r, c, boardState[selected.r][selected.c], currentTurn)) handleActualMove(selected, {r,c}, true);
-                    else { selected = getTeam(piece) === currentTurn ? {r,c} : null; render(); }
-                } else if(getTeam(piece) === currentTurn) { selected = {r,c}; render(); }
+                if(selected && moveIsLegal(selected.r, selected.c, r, c, boardState[selected.r][selected.c], currentTurn)) handleActualMove(selected, {r,c}, true);
+                else if(getTeam(piece) === currentTurn) { selected = {r,c}; render(); }
             };
             boardEl.appendChild(sq);
         }
     }
-    boardWrap.appendChild(boardEl); gameArea.appendChild(boardWrap);
-
+    gameArea.appendChild(boardEl);
     if(myColor === 'black') gameArea.appendChild(createBar(blackName, 'black'));
     else gameArea.appendChild(createBar(whiteName, 'white'));
-
     layout.appendChild(gameArea);
 
     const side = document.createElement('div'); side.id = 'side-panel';
-    side.innerHTML = `
-        <div id="status-box"><div id="status-text">${sTxt}</div></div>
-        <div id="notification-area"></div>
-        <div class="btn-row">
-            <button class="action-btn" onclick="offerDraw()">Offer Draw</button>
-            <button class="action-btn" onclick="resignGame()">Resign</button>
-        </div>
-        <div id="history-container"></div>
-    `;
+    side.innerHTML = `<div id="status-box"><div id="status-text">${sTxt}</div></div><div id="notification-area"></div>
+        <div class="btn-row"><button class="action-btn" onclick="offerDraw()">Offer Draw</button><button class="action-btn" onclick="resignGame()">Resign</button></div>
+        <div id="history-container"></div>`;
     const hCont = side.querySelector('#history-container');
-    moveHistory.forEach((m, i) => {
-        hCont.innerHTML += `<div class="history-row"><div class="move-num">${i+1}.</div><div class="move-val">${m.w}</div><div class="move-val">${m.b}</div></div>`;
-    });
+    moveHistory.forEach((m, i) => { hCont.innerHTML += `<div class="history-row"><div>${i+1}.</div><div>${m.w}</div><div>${m.b}</div></div>`; });
     layout.appendChild(side);
     updateTimerDisplay();
 }
 
-// --- 5. INIT & TIMERS ---
+// --- 5. SYSTEM ---
 function initGameState() {
     boardState = [['♜','♞','♝','♛','♚','♝','♞','♜'],['♟','♟','♟','♟','♟','♟','♟','♟'],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['♙','♙','♙','♙','♙','♙','♙','♙'],['♖','♘','♗','♕','♔','♗','♘','♖']];
     currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false; selected = null;
-    if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
+    if (window.chessInterval) clearInterval(window.chessInterval);
     if (!isInfinite) {
-        window.chessIntervalInstance = setInterval(() => {
+        window.chessInterval = setInterval(() => {
             if (isGameOver) return;
             if (currentTurn === 'white') whiteTime--; else blackTime--;
             updateTimerDisplay();
@@ -277,21 +241,18 @@ function initGameState() {
 
 function updateTimerDisplay() {
     const wT = document.getElementById('timer-white'), bT = document.getElementById('timer-black');
-    if (wT) { wT.textContent = formatTime(whiteTime); wT.className = `timer ${currentTurn === 'white' ? 'active' : ''}`; }
-    if (bT) { bT.textContent = formatTime(blackTime); bT.className = `timer ${currentTurn === 'black' ? 'active' : ''}`; }
+    if (wT) { wT.textContent = formatTime(whiteTime); wT.classList.toggle('active', currentTurn==='white'); }
+    if (bT) { bT.textContent = formatTime(blackTime); bT.classList.toggle('active', currentTurn==='black'); }
 }
-function formatTime(s) { if(isInfinite) return "∞"; const dS=Math.max(0,s); return `${Math.floor(dS/60)}:${(dS%60).toString().padStart(2,'0')}`; }
+function formatTime(s) { if(isInfinite) return "∞"; const d=Math.max(0,s); return `${Math.floor(d/60)}:${(d%60).toString().padStart(2,'0')}`; }
 
 function showSetup() {
     const overlay = document.createElement('div'); overlay.id = 'setup-overlay';
-    overlay.innerHTML = `
-        <div class="setup-card">
-            <h2>Chess Lobby</h2>
-            <div class="input-group"><label>Room Password</label><input id="roomPass" placeholder="Secret Code"></div>
-            <div class="input-group"><label>Your Name</label><input id="uName" value="Player"></div>
-            <div class="input-group"><label>Minutes (White only)</label><input type="number" id="tMin" value="10"></div>
-            <button class="start-btn" id="startBtn">JOIN / CREATE ROOM</button>
-        </div>`;
+    overlay.innerHTML = `<div class="setup-card"><h2>Lobby</h2>
+        <div class="input-group"><label>Password</label><input id="roomPass"></div>
+        <div class="input-group"><label>Name</label><input id="uName" value="Player"></div>
+        <div class="input-group"><label>Minutes</label><input type="number" id="tMin" value="10"></div>
+        <button class="start-btn" id="startBtn">PLAY</button></div>`;
     document.body.appendChild(overlay);
     document.getElementById('startBtn').onclick = () => {
         currentPassword = document.getElementById('roomPass').value;

@@ -20,7 +20,7 @@ body { background: #312e2b; display: flex; align-items: center; justify-content:
 .b-piece { color: #000; }
 
 .player-bar { display: flex; justify-content: space-between; align-items: center; background: #262421; padding: 8px 12px; border-radius: 4px; min-width: 480px; box-sizing: border-box;}
-.player-name { font-weight: bold; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.player-name { font-weight: bold; color: #fff; }
 .timer { font-family: monospace; font-size: 18px; background: #312e2b; padding: 4px 8px; border-radius: 3px; border: 1px solid #444; min-width: 65px; text-align: center;}
 .timer.active { background: #fff; color: #000; font-weight: bold; }
 

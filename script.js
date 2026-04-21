@@ -3,19 +3,23 @@ let myColor = null;
 let currentPassword = null;
 let whiteName = "White", blackName = "Black"; 
 
-// MULTIPLAYER LISTENERS
+// 1. MULTIPLAYER LISTENERS
 socket.on("player-assignment", (data) => {
     myColor = data.color;
     let m = parseInt(data.settings.mins) || 10;
     whiteTime = m * 60; 
     blackTime = whiteTime;
     isInfinite = (m === 0);
+    
     whiteName = data.settings.whiteName || "White";
+    
     if (myColor === "black") {
-        blackName = document.getElementById('uName')?.value || "Black";
+        const inputName = document.getElementById('uName').value;
+        blackName = inputName || "Black";
     } else {
         blackName = "Waiting...";
     }
+    
     initGameState();
 });
 
@@ -32,7 +36,7 @@ socket.on("receive-move", (data) => {
 
 socket.on("error-msg", (msg) => alert(msg));
 
-// PIECE MAPPING
+// 2. GAME MECHANICS
 const whiteChars = ['♖', '♘', '♗', '♕', '♔', '♙'];
 const isWhite = (char) => whiteChars.includes(char);
 const getTeam = (char) => char === '' ? null : (isWhite(char) ? 'white' : 'black');
@@ -45,12 +49,11 @@ let boardState, currentTurn, hasMoved, enPassantTarget, selected, isGameOver, is
 let whiteTime, blackTime, moveHistory;
 const mainLayout = document.getElementById('main-layout');
 
-// VALIDATION BRAIN
 function validateMoveMechanics(fR, fC, tR, tC, p, tar, b) {
     const dr = tR-fR, dc = tC-fC, adr = Math.abs(dr), adc = Math.abs(dc), team = getTeam(p);
     if (tar !== '' && getTeam(tar) === team) return false;
     const clear = (r1, c1, r2, c2) => {
-        const sr = r2 === r1 ? 0 : (r2-r1)/Math.max(1, Math.abs(r2-r1)), sc = c2 === c1 ? 0 : (c2-c1)/Math.max(1, Math.abs(c2-c1));
+        const sr = r2 === r1 ? 0 : (r2-r1)/Math.abs(r2-r1), sc = c2 === c1 ? 0 : (c2-c1)/Math.abs(c2-c1);
         let cr = r1+sr, cc = c1+sc;
         while(cr !== r2 || cc !== c2) { if (b[cr][cc] !== '') return false; cr+=sr; cc+=sc; }
         return true;
@@ -98,7 +101,7 @@ function getNotation(fR, fC, tR, tC, piece, target, isEP, castle) {
     return p + cap + files[tC] + rows[tR];
 }
 
-// EXECUTION
+// 3. CORE LOGIC
 function handleActualMove(from, to, isLocal) {
     const p = boardState[from.r][from.c];
     const isEP = (p==='♙'||p==='♟') && enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
@@ -206,8 +209,9 @@ function showSetup() {
     document.body.appendChild(overlay);
     document.getElementById('startBtn').onclick = () => {
         currentPassword = document.getElementById('roomPass').value;
+        const nameInput = document.getElementById('uName').value;
         if(!currentPassword) return alert("Enter password");
-        socket.emit("join-room", { password: currentPassword, name: document.getElementById('uName').value, mins: document.getElementById('tMin').value });
+        socket.emit("join-room", { password: currentPassword, name: nameInput, mins: document.getElementById('tMin').value });
         overlay.remove();
     };
 }

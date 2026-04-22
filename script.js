@@ -130,6 +130,8 @@ function handleActualMove(from, to, isLocal) {
     const movingPiece = boardState[from.r][from.c];
     const targetPiece = boardState[to.r][to.c];
     const isEP = (movingPiece==='♙'||movingPiece==='♟') && enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
+    const movingTeam = currentTurn;
+    const opponentTeam = movingTeam === 'white' ? 'black' : 'white';
     
     let castle = null;
     if((movingPiece==='♔'||movingPiece==='♚') && Math.abs(from.c - to.c) === 2) {
@@ -140,42 +142,48 @@ function handleActualMove(from, to, isLocal) {
 
     let note = getNotation(from.r, from.c, to.r, to.c, movingPiece, targetPiece, isEP, castle);
     
+    // 1. Execute the move on the board
     if(isEP) boardState[from.r][to.c] = '';
     hasMoved[`${from.r},${from.c}`] = 1; 
     boardState[to.r][to.c] = movingPiece; boardState[from.r][from.c] = '';
     
-    // Promotion
+    // 2. Promotion check
     if(movingPiece==='♙' && to.r===0) boardState[to.r][to.c] = '♕'; 
     if(movingPiece==='♟' && to.r===7) boardState[to.r][to.c] = '♛';
 
-    const movingTeam = currentTurn;
-    currentTurn = (currentTurn === 'white') ? 'black' : 'white';
+    // 3. Update En Passant availability
+    enPassantTarget = (movingPiece==='♙'||movingPiece==='♟') && Math.abs(from.r - to.r) === 2 ? {r:(from.r+to.r)/2, c: to.c} : null;
+
+    // 4. PRE-ASSESSMENT: Switch turn to opponent to calculate their legal options
+    currentTurn = opponentTeam; 
     
-    // Check game state for the NEXT player
-    const check = isInCheck(currentTurn, boardState);
-    const movesAvailable = hasLegalMoves(currentTurn);
+    const opponentInCheck = isInCheck(opponentTeam, boardState);
+    const opponentHasMoves = hasLegalMoves(opponentTeam);
     let forcedStatus = null;
 
-    if (!movesAvailable) {
+    if (!opponentHasMoves) {
         isGameOver = true;
         if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
-        if (check) {
-            note += '#';
+        
+        if (opponentInCheck) {
+            note += '#'; // Checkmate symbol
             forcedStatus = `CHECKMATE! ${movingTeam.toUpperCase()} WINS`;
         } else {
             forcedStatus = "DRAW BY STALEMATE";
         }
-    } else if (check) {
-        note += '+';
+    } else if (opponentInCheck) {
+        note += '+'; // Check symbol
     }
 
+    // 5. Update Move History UI
     if(movingTeam === 'white') moveHistory.push({w: note, b: ''}); 
     else moveHistory[moveHistory.length-1].b = note;
 
-    enPassantTarget = (movingPiece==='♙'||movingPiece==='♟') && Math.abs(from.r - to.r) === 2 ? {r:(from.r+to.r)/2, c: to.c} : null;
     selected = null;
     
+    // 6. Sync with Server
     if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to }, whiteTime, blackTime });
+    
     render(forcedStatus);
 }
 
@@ -232,8 +240,16 @@ function render(forcedStatus) {
     layout.replaceChildren();
 
     const check = isInCheck(currentTurn, boardState);
-    // Determine status text: if forcedStatus exists (Mate/Resign), use it. Else use Turn.
-    let sTxt = forcedStatus || `${currentTurn.toUpperCase()}'S TURN ${check ? '(CHECK!)' : ''}`;
+    
+    // Status Logic
+    let sTxt = "";
+    if (isGameOver && forcedStatus) {
+        sTxt = forcedStatus;
+    } else if (isGameOver) {
+        sTxt = "GAME OVER";
+    } else {
+        sTxt = `${currentTurn.toUpperCase()}'S TURN ${check ? '(CHECK!)' : ''}`;
+    }
 
     const gameArea = document.createElement('div');
     gameArea.id = 'game-area';
@@ -263,7 +279,7 @@ function render(forcedStatus) {
             const piece = boardState[r][c];
             sq.className = `square ${(r+c)%2===0 ? 'white-sq' : 'black-sq'}`;
             
-            // Highlight King if in check
+            // King Check Highlight
             if (check && (piece === (currentTurn === 'white' ? '♔' : '♚'))) {
                 sq.classList.add('king-check');
             }

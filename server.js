@@ -7,11 +7,12 @@ const PORT = process.env.PORT || 3000;
 const rooms = {}; 
 
 io.on("connection", (socket) => {
+    // 1. Create Room
     socket.on("create-room", (data) => {
         const { password, name, mins, secs, inc, colorPref } = data;
         
         if (rooms[password]) {
-            socket.emit("error-msg", "Room password already in use.");
+            socket.emit("error-msg", "Room password already in use. Please choose another.");
             return;
         }
 
@@ -26,6 +27,7 @@ io.on("connection", (socket) => {
         socket.emit("room-created", { password });
     });
 
+    // 2. Join Attempt (Preview phase)
     socket.on("join-attempt", (data) => {
         const { password, name } = data;
         const room = rooms[password];
@@ -35,11 +37,11 @@ io.on("connection", (socket) => {
             return;
         }
         if (room.status !== "waiting") {
-            socket.emit("error-msg", "Room is already full or in progress.");
+            socket.emit("error-msg", "Room is already in progress.");
             return;
         }
 
-        // Calculate joiner's color based on creator preference
+        // Determine joiner's color based on creator's preference
         let joinerColor;
         const pref = room.settings.colorPref;
         if (pref === 'white') joinerColor = 'black';
@@ -53,6 +55,7 @@ io.on("connection", (socket) => {
         });
     });
 
+    // 3. Confirm Join (Handshake completion)
     socket.on("confirm-join", (data) => {
         const { password, name, color } = data;
         const room = rooms[password];
@@ -64,7 +67,6 @@ io.on("connection", (socket) => {
         const joinerId = socket.id;
         const creatorId = room.creatorId;
 
-        // Finalize assignments
         if (color === 'white') {
             room.players.white = joinerId;
             room.players.black = creatorId;
@@ -73,7 +75,6 @@ io.on("connection", (socket) => {
             room.players.black = joinerId;
         }
 
-        // Notify both players to start
         io.to(creatorId).emit("player-assignment", { 
             color: color === 'white' ? 'black' : 'white', 
             settings: room.settings,
@@ -90,6 +91,18 @@ io.on("connection", (socket) => {
         socket.to(data.password).emit("receive-move", data);
     });
 
+    socket.on("resign", (data) => {
+        socket.to(data.password).emit("opponent-resigned", { winner: data.winner });
+    });
+
+    socket.on("offer-draw", (data) => {
+        socket.to(data.password).emit("draw-offered");
+    });
+
+    socket.on("draw-response", (data) => {
+        socket.to(data.password).emit("draw-resolved", { accepted: data.accepted });
+    });
+
     socket.on("disconnecting", () => {
         socket.rooms.forEach(roomPass => {
             if (rooms[roomPass]) delete rooms[roomPass];
@@ -97,4 +110,4 @@ io.on("connection", (socket) => {
     });
 });
 
-http.listen(PORT, () => console.log(`Server on ${PORT}`));
+http.listen(PORT, () => console.log(`Server running on port ${PORT}`));

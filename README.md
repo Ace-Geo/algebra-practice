@@ -1,6 +1,6 @@
 # Algebra Practice
 Play here: ace-geo.github.io/algebra_practice/
-How to play:
+How to play:  
   Create a Room: Enter a password, your username, and choose your time control (minutes, seconds, and increment).
   Join a Room: Share the room password with a friend. They enter the password and confirm the settings to start the match.
   Gameplay:

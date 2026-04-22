@@ -5,6 +5,7 @@ const io = require("socket.io")(http, { cors: { origin: "*" } });
 
 const PORT = process.env.PORT || 3000;
 const rooms = {}; 
+const roomRematchStates = {}; // TRACKS REMATCH VOTES
 
 io.on("connection", (socket) => {
     socket.on("create-room", (data) => {
@@ -35,8 +36,6 @@ io.on("connection", (socket) => {
             socket.emit("error-msg", "Room is already in progress.");
             return;
         }
-
-        // Send the creator's preference so joiner sees "Random" if applicable
         socket.emit("preview-settings", {
             creatorName: room.creatorName,
             settings: room.settings,
@@ -54,7 +53,6 @@ io.on("connection", (socket) => {
         const joinerId = socket.id;
         const creatorId = room.creatorId;
 
-        // Determine actual colors at the moment of start
         let whiteId, blackId;
         const pref = room.settings.colorPref;
 
@@ -63,7 +61,6 @@ io.on("connection", (socket) => {
         } else if (pref === 'black') {
             whiteId = joinerId; blackId = creatorId;
         } else {
-            // Randomly assign
             if (Math.random() < 0.5) {
                 whiteId = creatorId; blackId = joinerId;
             } else {
@@ -74,13 +71,11 @@ io.on("connection", (socket) => {
         room.players.white = whiteId;
         room.players.black = blackId;
 
-        // Notify creator
         io.to(creatorId).emit("player-assignment", { 
             color: creatorId === whiteId ? 'white' : 'black', 
             settings: room.settings,
             oppName: name
         });
-        // Notify joiner
         io.to(joinerId).emit("player-assignment", { 
             color: joinerId === whiteId ? 'white' : 'black', 
             settings: room.settings,
@@ -100,13 +95,28 @@ io.on("connection", (socket) => {
         socket.to(data.password).emit("draw-offered");
     });
 
-    socket.on("draw-response", (data) => {
+    socket.on("draw-resolved", (data) => {
         socket.to(data.password).emit("draw-resolved", { accepted: data.accepted });
+    });
+
+    // --- NEW: REMATCH LOGIC ---
+    socket.on("rematch-request", (data) => {
+        const pass = data.password;
+        if (!roomRematchStates[pass]) roomRematchStates[pass] = new Set();
+        
+        roomRematchStates[pass].add(socket.id);
+        socket.to(pass).emit("rematch-offered");
+
+        if (roomRematchStates[pass].size === 2) {
+            delete roomRematchStates[pass];
+            io.in(pass).emit("rematch-start");
+        }
     });
 
     socket.on("disconnecting", () => {
         socket.rooms.forEach(roomPass => {
             if (rooms[roomPass]) delete rooms[roomPass];
+            if (roomRematchStates[roomPass]) delete roomRematchStates[roomPass];
         });
     });
 });

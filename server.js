@@ -5,7 +5,7 @@ const io = require("socket.io")(http, { cors: { origin: "*" } });
 
 const PORT = process.env.PORT || 3000;
 const rooms = {}; 
-const roomRematchStates = {}; // TRACKS REMATCH VOTES
+const roomRematchStates = {}; 
 
 io.on("connection", (socket) => {
     socket.on("create-room", (data) => {
@@ -36,6 +36,7 @@ io.on("connection", (socket) => {
             socket.emit("error-msg", "Room is already in progress.");
             return;
         }
+
         socket.emit("preview-settings", {
             creatorName: room.creatorName,
             settings: room.settings,
@@ -99,7 +100,7 @@ io.on("connection", (socket) => {
         socket.to(data.password).emit("draw-resolved", { accepted: data.accepted });
     });
 
-    // --- NEW: REMATCH LOGIC ---
+    // --- REMATCH HANDSHAKE ---
     socket.on("rematch-request", (data) => {
         const pass = data.password;
         if (!roomRematchStates[pass]) roomRematchStates[pass] = new Set();

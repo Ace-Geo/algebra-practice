@@ -31,7 +31,6 @@ io.on("connection", (socket) => {
         socket.to(data.password).emit("receive-move", data);
     });
 
-    // NEW: Resignation and Draw Logic
     socket.on("resign", (data) => {
         socket.to(data.password).emit("opponent-resigned", { winner: data.winner });
     });

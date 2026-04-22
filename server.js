@@ -25,7 +25,7 @@ io.on("connection", (socket) => {
     });
 
     socket.on("join-attempt", (data) => {
-        const { password, name } = data;
+        const { password } = data;
         const room = rooms[password];
         if (!room) {
             socket.emit("error-msg", "Room not found.");
@@ -35,21 +35,17 @@ io.on("connection", (socket) => {
             socket.emit("error-msg", "Room is already in progress.");
             return;
         }
-        let joinerColor;
-        const pref = room.settings.colorPref;
-        if (pref === 'white') joinerColor = 'black';
-        else if (pref === 'black') joinerColor = 'white';
-        else joinerColor = Math.random() < 0.5 ? 'white' : 'black';
 
+        // Send the creator's preference so joiner sees "Random" if applicable
         socket.emit("preview-settings", {
             creatorName: room.creatorName,
             settings: room.settings,
-            yourColor: joinerColor
+            creatorColorPref: room.settings.colorPref
         });
     });
 
     socket.on("confirm-join", (data) => {
-        const { password, name, color } = data;
+        const { password, name } = data;
         const room = rooms[password];
         if (!room || room.status !== "waiting") return;
 
@@ -58,21 +54,35 @@ io.on("connection", (socket) => {
         const joinerId = socket.id;
         const creatorId = room.creatorId;
 
-        if (color === 'white') {
-            room.players.white = joinerId;
-            room.players.black = creatorId;
+        // Determine actual colors at the moment of start
+        let whiteId, blackId;
+        const pref = room.settings.colorPref;
+
+        if (pref === 'white') {
+            whiteId = creatorId; blackId = joinerId;
+        } else if (pref === 'black') {
+            whiteId = joinerId; blackId = creatorId;
         } else {
-            room.players.white = creatorId;
-            room.players.black = joinerId;
+            // Randomly assign
+            if (Math.random() < 0.5) {
+                whiteId = creatorId; blackId = joinerId;
+            } else {
+                whiteId = joinerId; blackId = creatorId;
+            }
         }
 
+        room.players.white = whiteId;
+        room.players.black = blackId;
+
+        // Notify creator
         io.to(creatorId).emit("player-assignment", { 
-            color: color === 'white' ? 'black' : 'white', 
+            color: creatorId === whiteId ? 'white' : 'black', 
             settings: room.settings,
             oppName: name
         });
+        // Notify joiner
         io.to(joinerId).emit("player-assignment", { 
-            color: color, 
+            color: joinerId === whiteId ? 'white' : 'black', 
             settings: room.settings,
             oppName: room.creatorName
         });

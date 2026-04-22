@@ -7,15 +7,12 @@ const PORT = process.env.PORT || 3000;
 const rooms = {}; 
 
 io.on("connection", (socket) => {
-    // 1. Create Room
     socket.on("create-room", (data) => {
         const { password, name, mins, secs, inc, colorPref } = data;
-        
         if (rooms[password]) {
-            socket.emit("error-msg", "Room password already in use. Please choose another.");
+            socket.emit("error-msg", "Room password already in use.");
             return;
         }
-
         socket.join(password);
         rooms[password] = {
             creatorId: socket.id,
@@ -27,11 +24,9 @@ io.on("connection", (socket) => {
         socket.emit("room-created", { password });
     });
 
-    // 2. Join Attempt (Preview phase)
     socket.on("join-attempt", (data) => {
         const { password, name } = data;
         const room = rooms[password];
-
         if (!room) {
             socket.emit("error-msg", "Room not found.");
             return;
@@ -40,8 +35,6 @@ io.on("connection", (socket) => {
             socket.emit("error-msg", "Room is already in progress.");
             return;
         }
-
-        // Determine joiner's color based on creator's preference
         let joinerColor;
         const pref = room.settings.colorPref;
         if (pref === 'white') joinerColor = 'black';
@@ -55,7 +48,6 @@ io.on("connection", (socket) => {
         });
     });
 
-    // 3. Confirm Join (Handshake completion)
     socket.on("confirm-join", (data) => {
         const { password, name, color } = data;
         const room = rooms[password];
@@ -63,7 +55,6 @@ io.on("connection", (socket) => {
 
         socket.join(password);
         room.status = "active";
-        
         const joinerId = socket.id;
         const creatorId = room.creatorId;
 

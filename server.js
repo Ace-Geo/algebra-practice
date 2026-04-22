@@ -1,75 +1,91 @@
 const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const path = require('path');
-
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server, {
-    cors: { origin: "*" }
-});
+const http = require('http').createServer(app);
+const io = require("socket.io")(http, { cors: { origin: "*" } });
 
-app.use(express.static(path.join(__dirname, 'public')));
-
-let rooms = {};
-let roomRematchStates = {}; 
+const PORT = process.env.PORT || 3000;
+const rooms = {}; 
 
 io.on("connection", (socket) => {
     socket.on("create-room", (data) => {
         const { password, name, mins, secs, inc, colorPref } = data;
         if (rooms[password]) {
-            socket.emit("error-msg", "Room already exists");
+            socket.emit("error-msg", "Room password already in use.");
             return;
         }
-        rooms[password] = {
-            creator: socket.id,
-            creatorName: name,
-            settings: { mins, secs, inc },
-            colorPref,
-            players: [{ id: socket.id, name }]
-        };
         socket.join(password);
+        rooms[password] = {
+            creatorId: socket.id,
+            creatorName: name,
+            settings: { mins, secs, inc, colorPref },
+            status: "waiting",
+            players: { white: null, black: null }
+        };
         socket.emit("room-created", { password });
     });
 
     socket.on("join-attempt", (data) => {
-        const room = rooms[data.password];
-        if (!room) return socket.emit("error-msg", "Room not found");
-        if (room.players.length >= 2) return socket.emit("error-msg", "Room full");
-        
+        const { password } = data;
+        const room = rooms[password];
+        if (!room) {
+            socket.emit("error-msg", "Room not found.");
+            return;
+        }
+        if (room.status !== "waiting") {
+            socket.emit("error-msg", "Room is already in progress.");
+            return;
+        }
+
+        // Send the creator's preference so joiner sees "Random" if applicable
         socket.emit("preview-settings", {
-            settings: room.settings,
             creatorName: room.creatorName,
-            creatorColorPref: room.colorPref
+            settings: room.settings,
+            creatorColorPref: room.settings.colorPref
         });
     });
 
     socket.on("confirm-join", (data) => {
-        const room = rooms[data.password];
-        if (!room || room.players.length >= 2) return;
+        const { password, name } = data;
+        const room = rooms[password];
+        if (!room || room.status !== "waiting") return;
 
-        const guestName = data.name || "Guest";
-        room.players.push({ id: socket.id, name: guestName });
-        socket.join(data.password);
+        socket.join(password);
+        room.status = "active";
+        const joinerId = socket.id;
+        const creatorId = room.creatorId;
 
+        // Determine actual colors at the moment of start
         let whiteId, blackId;
-        const creator = room.players[0];
-        const guest = room.players[1];
+        const pref = room.settings.colorPref;
 
-        if (room.colorPref === 'white') {
-            whiteId = creator.id; blackId = guest.id;
-        } else if (room.colorPref === 'black') {
-            whiteId = guest.id; blackId = creator.id;
+        if (pref === 'white') {
+            whiteId = creatorId; blackId = joinerId;
+        } else if (pref === 'black') {
+            whiteId = joinerId; blackId = creatorId;
         } else {
-            if (Math.random() > 0.5) {
-                whiteId = creator.id; blackId = guest.id;
+            // Randomly assign
+            if (Math.random() < 0.5) {
+                whiteId = creatorId; blackId = joinerId;
             } else {
-                whiteId = guest.id; blackId = creator.id;
+                whiteId = joinerId; blackId = creatorId;
             }
         }
 
-        io.to(whiteId).emit("player-assignment", { color: 'white', settings: room.settings, oppName: guest.id === whiteId ? creator.name : guest.name });
-        io.to(blackId).emit("player-assignment", { color: 'black', settings: room.settings, oppName: guest.id === blackId ? creator.name : guest.name });
+        room.players.white = whiteId;
+        room.players.black = blackId;
+
+        // Notify creator
+        io.to(creatorId).emit("player-assignment", { 
+            color: creatorId === whiteId ? 'white' : 'black', 
+            settings: room.settings,
+            oppName: name
+        });
+        // Notify joiner
+        io.to(joinerId).emit("player-assignment", { 
+            color: joinerId === whiteId ? 'white' : 'black', 
+            settings: room.settings,
+            oppName: room.creatorName
+        });
     });
 
     socket.on("send-move", (data) => {
@@ -77,7 +93,7 @@ io.on("connection", (socket) => {
     });
 
     socket.on("resign", (data) => {
-        io.in(data.password).emit("opponent-resigned", { winner: data.winner });
+        socket.to(data.password).emit("opponent-resigned", { winner: data.winner });
     });
 
     socket.on("offer-draw", (data) => {
@@ -85,30 +101,14 @@ io.on("connection", (socket) => {
     });
 
     socket.on("draw-response", (data) => {
-        io.in(data.password).emit("draw-resolved", { accepted: data.accepted });
-    });
-
-    // --- REMATCH HANDSHAKE ---
-    socket.on("rematch-request", (data) => {
-        const roomPass = data.password;
-        if (!roomRematchStates[roomPass]) roomRematchStates[roomPass] = new Set();
-
-        roomRematchStates[roomPass].add(socket.id);
-        socket.to(roomPass).emit("rematch-offered");
-
-        if (roomRematchStates[roomPass].size === 2) {
-            roomRematchStates[roomPass].clear();
-            io.in(roomPass).emit("rematch-start");
-        }
+        socket.to(data.password).emit("draw-resolved", { accepted: data.accepted });
     });
 
     socket.on("disconnecting", () => {
-        for (const room of socket.rooms) {
-            if (rooms[room]) delete rooms[room];
-            if (roomRematchStates[room]) delete roomRematchStates[room];
-        }
+        socket.rooms.forEach(roomPass => {
+            if (rooms[roomPass]) delete rooms[roomPass];
+        });
     });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+http.listen(PORT, () => console.log(`Server running on port ${PORT}`));

@@ -71,7 +71,7 @@ socket.on("rematch-offered", () => {
 
 socket.on("rematch-start", () => {
     rematchRequested = false;
-    // Swap colors for the rematch
+    // Swap colors for the rematch locally
     myColor = (myColor === 'white' ? 'black' : 'white');
     let oldWhite = whiteName;
     whiteName = blackName;
@@ -182,7 +182,6 @@ function isSquareAttacked(r, c, attackerTeam, b) {
         for(let j=0; j<8; j++) {
             const p = b[i][j];
             if(p !== '' && getTeam(p) === attackerTeam) {
-                // Simplified attack check for pawns
                 if (p === '♙' || p === '♟') {
                     const dir = getTeam(p) === 'white' ? -1 : 1;
                     if (Math.abs(c - j) === 1 && r - i === dir) return true;
@@ -314,7 +313,7 @@ function render(forcedStatus) {
     const layout = document.getElementById('main-layout');
     if (!layout) return;
 
-    // Preserve Chat/Input states
+    // Preserve Chat/Input states so they don't wipe on every move
     const oldChatHTML = document.getElementById('chat-messages')?.innerHTML || "";
     const oldInputValue = document.getElementById('chat-input')?.value || "";
 

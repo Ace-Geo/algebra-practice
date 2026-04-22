@@ -7,12 +7,17 @@ let whiteTime, blackTime, moveHistory;
 // --- 1. SOCKET LISTENERS ---
 socket.on("waiting-for-opponent", () => {
     const overlay = document.getElementById('setup-overlay');
-    if (overlay) overlay.innerHTML = `<div class="setup-card"><h2>Room Created</h2><p>Waiting for an opponent to join with your password...</p></div>`;
+    if (overlay) {
+        overlay.innerHTML = `
+            <div class="setup-card">
+                <h2>Room Created</h2>
+                <p>Waiting for an opponent to join using password: <b>${currentPassword}</b></p>
+                <div class="loader"></div>
+            </div>`;
+    }
 });
 
-socket.on("error-msg", (msg) => {
-    alert(msg);
-});
+socket.on("error-msg", (msg) => alert(msg));
 
 socket.on("confirm-settings", (data) => {
     const { settings, creatorName } = data;
@@ -39,32 +44,34 @@ socket.on("confirm-settings", (data) => {
 
 socket.on("game-start", (data) => {
     const s = data.settings;
-    whiteName = data.whiteName; blackName = data.blackName;
-    whiteTime = (s.mins * 60) + s.secs; blackTime = whiteTime;
-    increment = s.inc;
+    whiteName = data.whiteName || "White"; 
+    blackName = data.blackName || "Black";
+    whiteTime = (parseInt(s.mins) * 60) + parseInt(s.secs); 
+    blackTime = whiteTime;
+    increment = parseInt(s.inc);
     isInfinite = (whiteTime === 0);
+    
     const overlay = document.getElementById('setup-overlay');
-    if (overlay) overlay.remove();
+    if (overlay) overlay.style.display = 'none';
     initGameState();
 });
 
 socket.on("assign-color", (color) => { myColor = color; render(); });
+
 socket.on("receive-move", (data) => {
-    whiteTime = data.whiteTime; blackTime = data.blackTime;
+    whiteTime = data.whiteTime;
+    blackTime = data.blackTime;
     handleActualMove(data.move.from, data.move.to, false);
 });
 
-socket.on("opponent-resigned", (data) => { if(!isGameOver){ isGameOver = true; render(`${data.winner.toUpperCase()} WINS BY RESIGNATION`); }});
-socket.on("draw-offered", () => {
-    const area = document.getElementById('notification-area');
-    if(area && !isGameOver) area.innerHTML = `<div class="draw-modal">Opponent offers draw<div class="modal-btns">
-        <button onclick="respondToDraw(true)" style="background:#779556;color:#fff">Accept</button>
-        <button onclick="respondToDraw(false)" style="background:#312e2b;color:#aaa">Decline</button>
-    </div></div>`;
+socket.on("opponent-resigned", (data) => {
+    if(!isGameOver){
+        isGameOver = true;
+        render(`${data.winner.toUpperCase()} WINS BY RESIGNATION`);
+    }
 });
-socket.on("draw-resolved", (data) => { if(data.accepted && !isGameOver){ isGameOver = true; render("DRAW BY AGREEMENT"); }});
 
-// --- 2. CHESS LOGIC --- (Abbreviated helper functions)
+// --- 2. CHESS LOGIC ---
 const isWhite = (c) => ['♖','♙','♘','♗','♖','♕','♔'].includes(c);
 const getTeam = (c) => c === '' ? null : (isWhite(c) ? 'white' : 'black');
 const getPieceNotation = (p) => ({'♖':'R','♘':'N','♗':'B','♕':'Q','♔':'K','♜':'R','♞':'N','♝':'B','♛':'Q','♚':'K'}[p] || '');
@@ -135,6 +142,7 @@ function handleActualMove(from, to, isLocal) {
     }
     const files=['a','b','c','d','e','f','g','h'], rows=['8','7','6','5','4','3','2','1'];
     let note = (getPieceNotation(p) || (boardState[to.r][to.c]!==''||isEP?files[from.c]:'')) + (boardState[to.r][to.c]!==''||isEP?'x':'') + files[to.c] + rows[to.r];
+    
     if (isLocal) { if(currentTurn==='white') whiteTime+=increment; else blackTime+=increment; }
     hasMoved[`${from.r},${from.c}`] = 1; 
     boardState[to.r][to.c] = p; boardState[from.r][from.c] = '';
@@ -238,7 +246,14 @@ function updateTimerDisplay() {
 function formatTime(s) { if(isInfinite) return "∞"; const d=Math.max(0,s); return `${Math.floor(d/60)}:${(d%60).toString().padStart(2,'0')}`; }
 
 function showSetup() {
-    const overlay = document.getElementById('setup-overlay');
+    // Failsafe: Ensure overlay exists
+    let overlay = document.getElementById('setup-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'setup-overlay';
+        document.body.appendChild(overlay);
+    }
+    
     let activeTab = 'create';
 
     const renderOverlay = () => {
@@ -248,9 +263,8 @@ function showSetup() {
                 <button id="tabCreate" class="tab-btn ${activeTab==='create'?'active':''}">CREATE</button>
                 <button id="tabJoin" class="tab-btn ${activeTab==='join'?'active':''}">JOIN</button>
             </div>
-            <div class="input-group"><label>Room Password</label><input id="roomPass"></div>
+            <div class="input-group"><label>Room Password</label><input id="roomPass" placeholder="e.g. 1234"></div>
             <div class="input-group"><label>Your Name</label><input id="uName" value="Player"></div>
-            
             <div id="tabContent"></div>
         </div>`;
 
@@ -265,21 +279,24 @@ function showSetup() {
                     </div>
                 </div>
                 <div class="input-group"><label>Play As</label>
-                    <select id="pColor"><option value="white">White</option><option value="black">Black</option><option value="random">Random</option></select>
+                    <select id="pColor">
+                        <option value="white">White</option>
+                        <option value="black">Black</option>
+                        <option value="random">Random</option>
+                    </select>
                 </div>
                 <button class="start-btn" id="actionBtn">CREATE ROOM</button>`;
         } else {
             content.innerHTML = `<button class="start-btn" id="actionBtn">JOIN ROOM</button>`;
         }
 
-        // Re-attach listeners every time the HTML is written
         document.getElementById('tabCreate').onclick = () => { activeTab = 'create'; renderOverlay(); };
         document.getElementById('tabJoin').onclick = () => { activeTab = 'join'; renderOverlay(); };
 
         document.getElementById('actionBtn').onclick = () => {
             currentPassword = document.getElementById('roomPass').value;
             const uName = document.getElementById('uName').value;
-            localStorage.setItem('lastUName', uName); // Save for the confirmation step
+            localStorage.setItem('lastUName', uName);
 
             if (!currentPassword) {
                 alert("Please enter a password.");
@@ -303,4 +320,6 @@ function showSetup() {
 
     renderOverlay();
 }
+
+// Kick it off
 window.onload = showSetup;

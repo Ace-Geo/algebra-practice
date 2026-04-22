@@ -125,20 +125,17 @@ function getNotation(fR, fC, tR, tC, piece, target, isEP, castle) {
     return p + cap + files[tC] + rows[tR];
 }
 
-// Strictly evaluates if a piece can physically reach a square, ignoring check discovery
 function canAttackSquare(fR, fC, tR, tC, p, b) {
     const dr = tR-fR, dc = tC-fC, adr = Math.abs(dr), adc = Math.abs(dc), team = getTeam(p);
-    
     const clearPath = (r1, c1, r2, c2) => {
         const sr = r2 === r1 ? 0 : (r2-r1)/Math.abs(r2-r1), sc = c2 === c1 ? 0 : (c2-c1)/Math.abs(c2-c1);
         let cr = r1+sr, cc = c1+sc;
         while(cr !== r2 || cc !== c2) { if (b[cr][cc] !== '') return false; cr+=sr; cc+=sc; }
         return true;
     };
-
     if (p === '♙' || p === '♟') {
         const dir = team === 'white' ? -1 : 1;
-        return adc === 1 && dr === dir; // For attack, pawns only hit diagonals
+        return adc === 1 && dr === dir;
     }
     if (['♖','♜'].includes(p)) return (dr===0 || dc===0) && clearPath(fR,fC,tR,tC);
     if (['♘','♞'].includes(p)) return (adr===2 && adc===1) || (adr===1 && adc===2);
@@ -148,19 +145,16 @@ function canAttackSquare(fR, fC, tR, tC, p, b) {
     return false;
 }
 
-// Logic for normal moves including double jumps, castling, and en-passant
 function canMoveTo(fR, fC, tR, tC, p, b) {
     const dr = tR-fR, dc = tC-fC, adr = Math.abs(dr), adc = Math.abs(dc), team = getTeam(p);
     const target = b[tR][tC];
     if (target !== '' && getTeam(target) === team) return false;
-
     const clearPath = (r1, c1, r2, c2) => {
         const sr = r2 === r1 ? 0 : (r2-r1)/Math.abs(r2-r1), sc = c2 === c1 ? 0 : (c2-c1)/Math.abs(c2-c1);
         let cr = r1+sr, cc = c1+sc;
         while(cr !== r2 || cc !== c2) { if (b[cr][cc] !== '') return false; cr+=sr; cc+=sc; }
         return true;
     };
-
     if (p === '♙' || p === '♟') {
         const dir = team === 'white' ? -1 : 1;
         if (dc === 0 && target === '') {
@@ -203,14 +197,10 @@ function isTeamInCheck(team, b) {
 function isMoveLegal(fR, fC, tR, tC, team) {
     const p = boardState[fR][fC];
     if (!canMoveTo(fR, fC, tR, tC, p, boardState)) return false;
-    
-    // Simulate board
     const nextBoard = boardState.map(row => [...row]);
     nextBoard[tR][tC] = p;
     nextBoard[fR][fC] = '';
-    // Handle EP capture in simulation
     if ((p==='♙'||p==='♟') && enPassantTarget?.r === tR && enPassantTarget?.c === tC) nextBoard[fR][tC] = '';
-    
     return !isTeamInCheck(team, nextBoard);
 }
 
@@ -355,7 +345,10 @@ function render(forcedStatus) {
             const sq = document.createElement('div');
             const piece = boardState[r][c];
             sq.className = `square ${(r+c)%2===0 ? 'white-sq' : 'black-sq'}`;
-            if (check && !isGameOver && piece === (currentTurn === 'white' ? '♔' : '♚')) sq.classList.add('king-check');
+            
+            // Fixed logic here: check highlighting stays red even when isGameOver is true
+            if (check && piece === (currentTurn === 'white' ? '♔' : '♚')) sq.classList.add('king-check');
+            
             if(selected?.r===r && selected?.c===c) sq.classList.add('selected');
             if(hints.some(h => h.r===r && h.c===c)) {
                 const dot = document.createElement('div');

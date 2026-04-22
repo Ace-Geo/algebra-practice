@@ -1,10 +1,22 @@
+// --- AUTO-INJECTOR ---
+function ensureDOM() {
+    if (!document.getElementById('setup-overlay')) {
+        const ov = document.createElement('div'); ov.id = 'setup-overlay';
+        document.body.appendChild(ov);
+    }
+    if (!document.getElementById('main-layout')) {
+        const ml = document.createElement('div'); ml.id = 'main-layout';
+        document.body.appendChild(ml);
+    }
+}
+
 const socket = io("https://algebra-but-better.onrender.com");
 let myColor, currentPassword, increment;
 let whiteName, blackName, whiteTime, blackTime;
 let boardState, currentTurn, selected, isGameOver, isInfinite;
 let hasMoved = {}, enPassantTarget = null, moveHistory = [];
 
-// --- UTILS & VALIDATION ---
+// --- CHESS LOGIC ---
 const isWhite = (c) => ['♖','♙','♘','♗','♕','♔'].includes(c);
 const getTeam = (c) => c === '' ? null : (isWhite(c) ? 'white' : 'black');
 const getNotation = (p) => ({'♖':'R','♘':'N','♗':'B','♕':'Q','♔':'K','♜':'R','♞':'N','♝':'B','♛':'Q','♚':'K'}[p] || '');
@@ -30,7 +42,6 @@ function validateMoveMechanics(fR, fC, tR, tC, p, tar, b) {
     if (['♕','♛'].includes(p)) return (adr===adc || dr===0 || dc===0) && clear(fR,fC,tR,tC);
     if (['♔','♚'].includes(p)) {
         if (adr <= 1 && adc <= 1) return true;
-        // Castling
         if (adc === 2 && dr === 0 && !hasMoved[`${fR},${fC}`]) {
             const rCol = tC === 6 ? 7 : 0;
             return b[fR][rCol] !== '' && !hasMoved[`${fR},${rCol}`] && clear(fR, fC, fR, rCol);
@@ -52,14 +63,11 @@ function moveIsLegal(fR, fC, tR, tC, p, team) {
     return true;
 }
 
-// --- ACTIONS ---
 function handleActualMove(from, to, isLocal) {
     const p = boardState[from.r][from.c];
     const files = ['a','b','c','d','e','f','g','h'], rows = ['8','7','6','5','4','3','2','1'];
     
-    // Logic for En Passant capture
     if ((p==='♙'||p==='♟') && enPassantTarget?.r === to.r && enPassantTarget?.c === to.c) boardState[from.r][to.c] = '';
-    // Logic for Castling
     if ((p==='♔'||p==='♚') && Math.abs(from.c - to.c) === 2) {
         const rOld = to.c === 6 ? 7 : 0, rNew = to.c === 6 ? 5 : 3;
         boardState[to.r][rNew] = boardState[to.r][rOld]; boardState[to.r][rOld] = '';
@@ -90,6 +98,7 @@ socket.on("game-start", (data) => {
     whiteTime = (data.settings.mins * 60) + data.settings.secs;
     blackTime = whiteTime; increment = data.settings.inc; isInfinite = (whiteTime === 0);
     document.getElementById('setup-overlay').style.display = 'none';
+    document.getElementById('main-layout').style.visibility = 'visible';
     initGameState();
 });
 socket.on("assign-color", (c) => { myColor = c; render(); });
@@ -98,7 +107,7 @@ socket.on("opponent-resigned", (d) => { isGameOver = true; render(`${d.winner.to
 socket.on("draw-offered", () => { if(confirm("Opponent offers a draw. Accept?")) socket.emit("draw-response", {password: currentPassword, accepted: true}); else socket.emit("draw-response", {password: currentPassword, accepted: false}); });
 socket.on("draw-result", (acc) => { if(acc) { isGameOver = true; render("DRAW BY AGREEMENT"); } });
 
-// --- UI ---
+// --- UI RENDER ---
 function render(statusOverride) {
     const layout = document.getElementById('main-layout');
     if (!layout) return; layout.replaceChildren();
@@ -120,8 +129,11 @@ function render(statusOverride) {
             const piece = boardState[r][c];
             sq.className = `square ${(r+c)%2===0 ? 'white-sq' : 'black-sq'}`;
             if (selected?.r===r && selected?.c===c) sq.classList.add('selected');
+            
+            // HINTS
             if (selected && moveIsLegal(selected.r, selected.c, r, c, boardState[selected.r][selected.c], currentTurn)) {
-                const hint = document.createElement('div'); hint.className = piece === '' ? 'hint-dot' : 'hint-capture';
+                const hint = document.createElement('div'); 
+                hint.className = piece === '' ? 'hint-dot' : 'hint-capture';
                 sq.appendChild(hint);
             }
             if(piece) {
@@ -171,17 +183,17 @@ function updateTimerDisplay() {
 }
 
 function showSetup() {
+    ensureDOM();
     const overlay = document.getElementById('setup-overlay');
-    if (!overlay) return;
     let tab = 'create';
     const draw = () => {
         overlay.innerHTML = `
         <div class="setup-card">
             <div class="tab-btns"><button class="tab-btn ${tab==='create'?'active':''}" id="tC">CREATE</button><button class="tab-btn ${tab==='join'?'active':''}" id="tJ">JOIN</button></div>
-            <div class="input-group"><label>Room Password</label><input id="roomPass"></div>
+            <div class="input-group"><label>Room Password</label><input id="roomPass" type="password"></div>
             <div class="input-group"><label>Your Name</label><input id="uName" value="Player"></div>
             ${tab==='create' ? `
-                <div class="input-group"><label>Time Control (Min | Sec | Inc)</label>
+                <div class="input-group"><label>Time (Min | Sec | Inc)</label>
                     <div class="time-row"><input type="number" id="tM" value="10"><input type="number" id="tS" value="0"><input type="number" id="tI" value="0"></div>
                 </div>
                 <div class="input-group"><label>Play As</label><select id="pC"><option value="white">White</option><option value="black">Black</option><option value="random">Random</option></select></div>

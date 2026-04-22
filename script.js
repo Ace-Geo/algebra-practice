@@ -4,7 +4,7 @@ let whiteName = "White", blackName = "Black";
 let boardState, currentTurn, hasMoved, enPassantTarget, selected, isGameOver, isInfinite;
 let whiteTime, blackTime, increment, moveHistory = [];
 
-// --- 1. SOCKET LISTENERS (Lobby Logic Untouched) ---
+// --- 1. SOCKET LISTENERS ---
 socket.on("player-assignment", (data) => {
     myColor = data.color;
     const s = data.settings;
@@ -63,7 +63,7 @@ socket.on("draw-resolved", (data) => {
 
 socket.on("error-msg", (msg) => alert(msg));
 
-// --- 2. LOBBY UI FUNCTIONS ---
+// --- 2. LOBBY UI ---
 function showSetup() {
     const overlay = document.createElement('div');
     overlay.id = 'setup-overlay';
@@ -187,6 +187,8 @@ function hasLegalMoves(team) {
 
 // --- 4. GAME ACTIONS ---
 function handleActualMove(from, to, isLocal) {
+    if (isGameOver) return; // Prevent moves if game is already over
+
     const movingPiece = boardState[from.r][from.c];
     const targetPiece = boardState[to.r][to.c];
     const isEP = (movingPiece==='♙'||movingPiece==='♟') && enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
@@ -216,17 +218,25 @@ function handleActualMove(from, to, isLocal) {
     let forcedStatus = null;
 
     if (!opponentHasMoves) {
-        isGameOver = true;
-        if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
-        if (opponentInCheck) { note += '#'; forcedStatus = `CHECKMATE! ${movingTeam.toUpperCase()} WINS`; }
-        else forcedStatus = "DRAW BY STALEMATE";
-    } else if (opponentInCheck) note += '+';
+        isGameOver = true; 
+        if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance); // Stop clock immediately
+        
+        if (opponentInCheck) { 
+            note += '#'; 
+            forcedStatus = `CHECKMATE! ${movingTeam.toUpperCase()} WINS`; 
+        } else {
+            forcedStatus = "DRAW BY STALEMATE";
+        }
+    } else if (opponentInCheck) {
+        note += '+';
+    }
 
     if(movingTeam === 'white') moveHistory.push({w: note, b: ''}); 
     else if(moveHistory.length > 0) moveHistory[moveHistory.length-1].b = note;
 
     enPassantTarget = (movingPiece==='♙'||movingPiece==='♟') && Math.abs(from.r - to.r) === 2 ? {r:(from.r+to.r)/2, c: to.c} : null;
     selected = null;
+    
     if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to }, whiteTime, blackTime });
     render(forcedStatus);
 }
@@ -296,7 +306,7 @@ function render(forcedStatus) {
             const sq = document.createElement('div');
             const piece = boardState[r][c];
             sq.className = `square ${(r+c)%2===0 ? 'white-sq' : 'black-sq'}`;
-            if (check && (piece === (currentTurn === 'white' ? '♔' : '♚'))) sq.classList.add('king-check');
+            if (check && !isGameOver && (piece === (currentTurn === 'white' ? '♔' : '♚'))) sq.classList.add('king-check');
             if(selected?.r===r && selected?.c===c) sq.classList.add('selected');
             if(hints.some(h => h.r===r && h.c===c)) {
                 const dot = document.createElement('div');
@@ -331,8 +341,8 @@ function render(forcedStatus) {
         <div id="status-box"><div id="status-text">${sTxt}</div></div>
         <div id="notification-area"></div>
         <div class="btn-row">
-            <button class="action-btn" onclick="offerDraw()">Offer Draw</button>
-            <button class="action-btn" onclick="resignGame()">Resign</button>
+            <button class="action-btn" onclick="offerDraw()" ${isGameOver ? 'disabled' : ''}>Offer Draw</button>
+            <button class="action-btn" onclick="resignGame()" ${isGameOver ? 'disabled' : ''}>Resign</button>
         </div>
         <div id="history-container"></div>
     `;

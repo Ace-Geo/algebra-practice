@@ -129,7 +129,7 @@ body {
 }
 .timer.active { background: #fff; color: #000; }
 
-/* RIGHT PANEL: HISTORY/INFO */
+/* RIGHT PANEL: HISTORY */
 #side-panel { display: flex; flex-direction: column; gap: 15px; height: 700px; }
 #status-box {
     background: var(--card);

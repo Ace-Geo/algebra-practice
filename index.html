@@ -3,15 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Algebra Practice</title>
+    <title>Chess Practice | Online</title>
     <link rel="stylesheet" href="style.css">
     <link rel="icon" href="data:,">
 </head>
 <body>
+
     <div id="setup-overlay"></div>
-    <div id="main-layout"></div>
+
+    <div id="main-layout">
+        <div id="board-container">
+            <div class="player-tag" id="black-name">Waiting for opponent...</div>
+            
+            <div id="board"></div>
+            
+            <div class="player-tag" id="white-name">You</div>
+        </div>
+
+        <div id="side-panel">
+            <div id="status-box">WHITE'S TURN</div>
+            
+            <div id="notation-table">
+                </div>
+
+            <div class="btn-group">
+                <button class="btn-action" onclick="socket.emit('offer-draw', {code:currentCode})">
+                    OFFER DRAW
+                </button>
+                <button class="btn-action" onclick="socket.emit('resign', {code:currentCode, side:myColor})">
+                    RESIGN
+                </button>
+            </div>
+        </div>
+    </div>
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    
     <script src="script.js"></script>
+
 </body>
 </html>

@@ -4,51 +4,97 @@ const http = require('http').createServer(app);
 const io = require("socket.io")(http, { cors: { origin: "*" } });
 
 const PORT = process.env.PORT || 3000;
-const roomSettings = {}; 
+const rooms = {}; 
 
 io.on("connection", (socket) => {
-    socket.on("join-room", (data) => {
-        const { password, name, mins } = data;
-        const room = io.sockets.adapter.rooms.get(password);
-        const numClients = room ? room.size : 0;
-        const safeName = name || "Anonymous";
-
-        if (numClients === 0) {
-            socket.join(password);
-            roomSettings[password] = { mins: mins || 10, whiteName: safeName };
-            socket.emit("player-assignment", { color: "white", settings: roomSettings[password] });
-        } else if (numClients === 1) {
-            socket.join(password);
-            const settings = roomSettings[password];
-            socket.emit("player-assignment", { color: "black", settings: settings });
-            socket.to(password).emit("opponent-joined", { blackName: safeName });
-        } else {
-            socket.emit("error-msg", "Room is full!");
+    socket.on("create-room", (data) => {
+        const { password, name, mins, secs, inc, colorPref } = data;
+        
+        if (rooms[password]) {
+            socket.emit("error-msg", "Room password already in use.");
+            return;
         }
+
+        socket.join(password);
+        rooms[password] = {
+            creatorId: socket.id,
+            creatorName: name,
+            settings: { mins, secs, inc, colorPref },
+            status: "waiting",
+            players: { white: null, black: null }
+        };
+        socket.emit("room-created", { password });
+    });
+
+    socket.on("join-attempt", (data) => {
+        const { password, name } = data;
+        const room = rooms[password];
+
+        if (!room) {
+            socket.emit("error-msg", "Room not found.");
+            return;
+        }
+        if (room.status !== "waiting") {
+            socket.emit("error-msg", "Room is already full or in progress.");
+            return;
+        }
+
+        // Calculate joiner's color based on creator preference
+        let joinerColor;
+        const pref = room.settings.colorPref;
+        if (pref === 'white') joinerColor = 'black';
+        else if (pref === 'black') joinerColor = 'white';
+        else joinerColor = Math.random() < 0.5 ? 'white' : 'black';
+
+        socket.emit("preview-settings", {
+            creatorName: room.creatorName,
+            settings: room.settings,
+            yourColor: joinerColor
+        });
+    });
+
+    socket.on("confirm-join", (data) => {
+        const { password, name, color } = data;
+        const room = rooms[password];
+        if (!room || room.status !== "waiting") return;
+
+        socket.join(password);
+        room.status = "active";
+        
+        const joinerId = socket.id;
+        const creatorId = room.creatorId;
+
+        // Finalize assignments
+        if (color === 'white') {
+            room.players.white = joinerId;
+            room.players.black = creatorId;
+        } else {
+            room.players.white = creatorId;
+            room.players.black = joinerId;
+        }
+
+        // Notify both players to start
+        io.to(creatorId).emit("player-assignment", { 
+            color: color === 'white' ? 'black' : 'white', 
+            settings: room.settings,
+            oppName: name
+        });
+        io.to(joinerId).emit("player-assignment", { 
+            color: color, 
+            settings: room.settings,
+            oppName: room.creatorName
+        });
     });
 
     socket.on("send-move", (data) => {
         socket.to(data.password).emit("receive-move", data);
     });
 
-    socket.on("resign", (data) => {
-        socket.to(data.password).emit("opponent-resigned", { winner: data.winner });
-    });
-
-    socket.on("offer-draw", (data) => {
-        socket.to(data.password).emit("draw-offered");
-    });
-
-    socket.on("draw-response", (data) => {
-        socket.to(data.password).emit("draw-resolved", { accepted: data.accepted });
-    });
-
     socket.on("disconnecting", () => {
-        socket.rooms.forEach(room => {
-            const clients = io.sockets.adapter.rooms.get(room);
-            if (clients && clients.size === 1) delete roomSettings[room];
+        socket.rooms.forEach(roomPass => {
+            if (rooms[roomPass]) delete rooms[roomPass];
         });
     });
 });
 
-http.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+http.listen(PORT, () => console.log(`Server on ${PORT}`));

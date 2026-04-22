@@ -4,7 +4,7 @@ let whiteName = "White", blackName = "Black";
 let boardState, currentTurn, hasMoved, enPassantTarget, selected, isGameOver, isInfinite;
 let whiteTime, blackTime, increment, moveHistory = [];
 
-// --- 1. SOCKET LOGIC ---
+// --- 1. SOCKET LISTENERS (Untouched) ---
 socket.on("player-assignment", (data) => {
     myColor = data.color;
     const s = data.settings;
@@ -27,12 +27,14 @@ socket.on("player-assignment", (data) => {
 
 socket.on("room-created", (data) => {
     const card = document.querySelector('.setup-card');
-    card.innerHTML = `<h2 style="color: #779556">Room Created</h2><p>Password: <strong>${data.password}</strong></p><div class="loader"></div><button class="action-btn" onclick="location.reload()">Cancel</button>`;
+    card.innerHTML = `<h2 style="color: #779556">Room Created</h2><p>Waiting for someone to join with password: <br><strong>${data.password}</strong></p><div class="loader"></div><button class="action-btn" onclick="location.reload()">Cancel</button>`;
 });
 
 socket.on("preview-settings", (data) => {
     const card = document.querySelector('.setup-card');
-    card.innerHTML = `<h2 style="color: #779556">Join Room?</h2><p>Host: ${data.creatorName}</p><button class="start-btn" onclick="confirmJoin()">CONFIRM & START</button>`;
+    const s = data.settings;
+    let displayColor = data.creatorColorPref === 'white' ? "BLACK" : (data.creatorColorPref === 'black' ? "WHITE" : "RANDOM");
+    card.innerHTML = `<h2 style="color: #779556">Join Room?</h2><div style="text-align: left; margin-bottom: 20px; background: #1a1a1a; padding: 15px; border-radius: 8px;"><p><strong>Host:</strong> ${data.creatorName}</p><p><strong>Time:</strong> ${s.mins}m ${s.secs}s</p><p><strong>Inc:</strong> ${s.inc}s</p><p><strong>Your Side:</strong> ${displayColor}</p></div><button class="start-btn" onclick="confirmJoin()">CONFIRM & START</button><button class="action-btn" style="margin-top:10px" onclick="location.reload()">Back</button>`;
 });
 
 socket.on("receive-move", (data) => {
@@ -44,10 +46,11 @@ socket.on("receive-move", (data) => {
 socket.on("opponent-resigned", (data) => {
     isGameOver = true;
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
-    render(`${data.winner.toUpperCase()} WINS BY RESIGNATION`);
+    render(`${data.winner.toUpperCase()()} WINS BY RESIGNATION`);
 });
 
 socket.on("draw-offered", () => showDrawOffer());
+
 socket.on("draw-resolved", (data) => {
     if (data.accepted) {
         isGameOver = true;
@@ -57,6 +60,8 @@ socket.on("draw-resolved", (data) => {
         showStatusMessage("Draw offer declined");
     }
 });
+
+socket.on("error-msg", (msg) => alert(msg));
 
 // --- 2. LOBBY UI ---
 function showSetup() {
@@ -68,12 +73,12 @@ function showSetup() {
             <div id="create-sect">
                 <div class="input-group"><label>Room Password</label><input id="roomPass" placeholder="Secret Code"></div>
                 <div class="input-group"><label>Username</label><input id="uName" value="Player 1"></div>
-                <div class="input-group"><label>Time</label><div style="display:flex; gap:5px;"><input type="number" id="tMin" value="10"><input type="number" id="tSec" value="0"><input type="number" id="tInc" value="0"></div></div>
+                <div class="input-group"><label>Time Control</label><div style="display:flex; gap:5px;"><input type="number" id="tMin" value="10"><input type="number" id="tSec" value="0"><input type="number" id="tInc" value="0"></div></div>
                 <div class="input-group"><label>Play As</label><select id="colorPref"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
                 <button class="start-btn" onclick="createRoom()">CREATE</button>
             </div>
             <div id="join-sect" style="display:none;">
-                <div class="input-group"><label>Password</label><input id="joinPass" placeholder="Password"></div>
+                <div class="input-group"><label>Room Password</label><input id="joinPass" placeholder="Password"></div>
                 <div class="input-group"><label>Username</label><input id="joinName" value="Player 2"></div>
                 <button class="start-btn" onclick="joinRoom()">FIND ROOM</button>
             </div>
@@ -84,17 +89,21 @@ function showSetup() {
 function switchTab(t) {
     document.getElementById('create-sect').style.display = t === 'create' ? 'block' : 'none';
     document.getElementById('join-sect').style.display = t === 'join' ? 'block' : 'none';
+    document.getElementById('tab-create').className = t === 'create' ? 'active' : '';
+    document.getElementById('tab-join').className = t === 'join' ? 'active' : '';
 }
 
 function createRoom() {
     currentPassword = document.getElementById('roomPass').value;
     tempName = document.getElementById('uName').value;
+    if(!currentPassword) return alert("Enter password");
     socket.emit("create-room", { password: currentPassword, name: tempName, mins: document.getElementById('tMin').value, secs: document.getElementById('tSec').value, inc: document.getElementById('tInc').value, colorPref: document.getElementById('colorPref').value });
 }
 
 function joinRoom() {
     currentPassword = document.getElementById('joinPass').value;
     tempName = document.getElementById('joinName').value;
+    if(!currentPassword) return alert("Enter password");
     socket.emit("join-attempt", { password: currentPassword });
 }
 
@@ -108,179 +117,14 @@ const getPieceNotation = (p) => {
     return map[p] || '';
 };
 
-function isInCheck(team, b) {
-    const k = team === 'white' ? '♔' : '♚';
-    let kr, kc;
-    for(let r=0; r<8; r++) for(let c=0; c<8; c++) if(b[r][c]===k){kr=r;kc=c;}
-    for(let r=0; r<8; r++) for(let c=0; c<8; c++) {
-        if(b[r][c] !== '' && getTeam(b[r][c]) !== team) {
-            if(validateMoveMechanics(r, c, kr, kc, b[r][c], k, b)) return true;
-        }
-    }
-    return false;
+function getNotation(fR, fC, tR, tC, piece, target, isEP, castle) {
+    if (castle) return castle === 'short' ? 'O-O' : 'O-O-O';
+    const files = ['a','b','c','d','e','f','g','h'], rows = ['8','7','6','5','4','3','2','1'];
+    let p = getPieceNotation(piece), cap = (target !== '' || isEP) ? 'x' : '';
+    if (p === '' && cap) p = files[fC]; 
+    return p + cap + files[tC] + rows[tR];
 }
 
-function moveIsLegal(fR, fC, tR, tC, p, team) {
-    if (!validateMoveMechanics(fR, fC, tR, tC, p, boardState[tR][tC], boardState)) return false;
-    const temp = boardState.map(r => [...r]);
-    temp[tR][tC] = p; temp[fR][fC] = '';
-    if ((p==='♙'||p==='♟') && enPassantTarget?.r === tR && enPassantTarget?.c === tC) temp[fR][tC] = '';
-    return !isInCheck(team, temp);
-}
-
-function hasLegalMoves(team) {
-    for (let r = 0; r < 8; r++) {
-        for (let c = 0; c < 8; c++) {
-            const p = boardState[r][c];
-            if (p !== '' && getTeam(p) === team) {
-                for (let tr = 0; tr < 8; tr++) {
-                    for (let tc = 0; tc < 8; tc++) {
-                        if (moveIsLegal(r, c, tr, tc, p, team)) return true;
-                    }
-                }
-            }
-        }
-    }
-    return false;
-}
-
-// --- 4. GAME ACTIONS ---
-function handleActualMove(from, to, isLocal) {
-    if (isGameOver) return;
-
-    const movingPiece = boardState[from.r][from.c];
-    const targetPiece = boardState[to.r][to.c];
-    const movingTeam = currentTurn;
-    const isEP = (movingPiece==='♙'||movingPiece==='♟') && enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
-    
-    let castle = null;
-    if((movingPiece==='♔'||movingPiece==='♚') && Math.abs(from.c - to.c) === 2) {
-        castle = from.c < to.c ? 'short' : 'long';
-        const rO = to.c === 6 ? 7 : 0, rN = to.c === 6 ? 5 : 3;
-        boardState[to.r][rN] = boardState[to.r][rO]; boardState[to.r][rO] = '';
-    }
-
-    let note = getNotation(from.r, from.c, to.r, to.c, movingPiece, targetPiece, isEP, castle);
-
-    if (isEP) boardState[from.r][to.c] = '';
-    boardState[to.r][to.c] = movingPiece;
-    boardState[from.r][from.c] = '';
-    hasMoved[`${from.r},${from.c}`] = 1;
-    
-    if(movingPiece==='♙' && to.r===0) boardState[to.r][to.c] = '♕'; 
-    if(movingPiece==='♟' && to.r===7) boardState[to.r][to.c] = '♛';
-
-    if (!isInfinite) {
-        if (movingTeam === 'white') whiteTime += increment;
-        else blackTime += increment;
-    }
-
-    currentTurn = movingTeam === 'white' ? 'black' : 'white';
-    enPassantTarget = (movingPiece==='♙'||movingPiece==='♟') && Math.abs(from.r - to.r) === 2 ? {r:(from.r+to.r)/2, c: to.c} : null;
-
-    const check = isInCheck(currentTurn, boardState);
-    const movesAvailable = hasLegalMoves(currentTurn);
-    let forcedStatus = null;
-
-    if (!movesAvailable) {
-        isGameOver = true;
-        if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
-        if (check) { note += '#'; forcedStatus = `CHECKMATE! ${movingTeam.toUpperCase()} WINS`; }
-        else forcedStatus = "DRAW BY STALEMATE";
-    } else if (check) note += '+';
-
-    if (movingTeam === 'white') moveHistory.push({ w: note, b: '' });
-    else if (moveHistory.length > 0) moveHistory[moveHistory.length - 1].b = note;
-
-    selected = null;
-    if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to }, whiteTime, blackTime });
-    render(forcedStatus);
-}
-
-// --- 5. UI RENDERER ---
-function render(forcedStatus) {
-    const layout = document.getElementById('main-layout');
-    if (!layout) return;
-    layout.replaceChildren();
-
-    const check = isInCheck(currentTurn, boardState);
-    let sTxt = forcedStatus || (isGameOver ? "GAME OVER" : `${currentTurn.toUpperCase()}'S TURN ${check ? '(CHECK!)' : ''}`);
-
-    const gameArea = document.createElement('div'); gameArea.id = 'game-area';
-    const createBar = (name, id) => {
-        const div = document.createElement('div'); div.className = 'player-bar';
-        div.innerHTML = `<span>${name}</span><div id="timer-${id}" class="timer"></div>`;
-        return div;
-    };
-
-    if(myColor === 'black') gameArea.appendChild(createBar(whiteName, 'white'));
-    else gameArea.appendChild(createBar(blackName, 'black'));
-
-    const boardCont = document.createElement('div'); boardCont.id = 'board-container';
-    const boardEl = document.createElement('div'); boardEl.id = 'board';
-    
-    let hints = [];
-    if(selected && !isGameOver) {
-        const p = boardState[selected.r][selected.c];
-        for(let r=0; r<8; r++) for(let c=0; c<8; c++) if(moveIsLegal(selected.r, selected.c, r, c, p, currentTurn)) hints.push({r,c});
-    }
-
-    const range = (myColor === 'black') ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
-    for(let r of range) {
-        for(let c of range) {
-            const sq = document.createElement('div');
-            const p = boardState[r][c];
-            sq.className = `square ${(r+c)%2===0 ? 'white-sq' : 'black-sq'}`;
-            if (check && !isGameOver && p === (currentTurn === 'white' ? '♔' : '♚')) sq.classList.add('king-check');
-            if (selected?.r===r && selected?.c===c) sq.classList.add('selected');
-            
-            if(hints.some(h => h.r===r && h.c===c)) {
-                const dot = document.createElement('div');
-                dot.className = p === '' ? 'hint-dot' : 'hint-capture';
-                sq.appendChild(dot);
-            }
-            if(p) {
-                const sp = document.createElement('span');
-                sp.className = `piece ${isWhite(p)?'w-piece':'b-piece'}`;
-                sp.textContent = p;
-                sq.appendChild(sp);
-            }
-            sq.onclick = () => {
-                if(isGameOver || currentTurn !== myColor) return;
-                if(selected) {
-                    if(moveIsLegal(selected.r, selected.c, r, c, boardState[selected.r][selected.c], currentTurn)) handleActualMove(selected, {r,c}, true);
-                    else { selected = getTeam(p) === currentTurn ? {r,c} : null; render(); }
-                } else if(getTeam(p) === currentTurn) { selected = {r,c}; render(); }
-            };
-            boardEl.appendChild(sq);
-        }
-    }
-    boardCont.appendChild(boardEl); gameArea.appendChild(boardCont);
-
-    if(myColor === 'black') gameArea.appendChild(createBar(blackName, 'black'));
-    else gameArea.appendChild(createBar(whiteName, 'white'));
-
-    layout.appendChild(gameArea);
-
-    const side = document.createElement('div'); side.id = 'side-panel';
-    side.innerHTML = `
-        <div id="status-box">${sTxt}</div>
-        <div id="notification-area"></div>
-        <div class="btn-row">
-            <button class="action-btn" onclick="offerDraw()" ${isGameOver?'disabled':''}>Offer Draw</button>
-            <button class="action-btn" onclick="resignGame()" ${isGameOver?'disabled':''}>Resign</button>
-        </div>
-        <div id="history-container"></div>
-    `;
-    const hCont = side.querySelector('#history-container');
-    moveHistory.forEach((m, i) => {
-        hCont.innerHTML += `<div class="history-row"><span>${i+1}.</span><span>${m.w}</span><span>${m.b}</span></div>`;
-    });
-    layout.appendChild(side);
-    updateTimerDisplay();
-}
-
-// --- 6. UTILS ---
 function validateMoveMechanics(fR, fC, tR, tC, p, tar, b) {
     const dr = tR-fR, dc = tC-fC, adr = Math.abs(dr), adc = Math.abs(dc), team = getTeam(p);
     if (tar !== '' && getTeam(tar) === team) return false;
@@ -309,18 +153,226 @@ function validateMoveMechanics(fR, fC, tR, tC, p, tar, b) {
     return false;
 }
 
-function getNotation(fR, fC, tR, tC, piece, target, isEP, castle) {
-    if (castle) return castle === 'short' ? 'O-O' : 'O-O-O';
-    const files = ['a','b','c','d','e','f','g','h'], rows = ['8','7','6','5','4','3','2','1'];
-    let p = getPieceNotation(piece), cap = (target !== '' || isEP) ? 'x' : '';
-    if (p === '' && cap) p = files[fC]; 
-    return p + cap + files[tC] + rows[tR];
+function isInCheck(team, b) {
+    const k = team === 'white' ? '♔' : '♚', atkTeam = team==='white'?'black':'white';
+    let kr = -1, kc = -1;
+    for(let r=0; r<8; r++) for(let c=0; c<8; c++) if(b[r][c]===k){kr=r;kc=c;}
+    if(kr === -1) return false;
+    for(let i=0; i<8; i++) for(let j=0; j<8; j++) if(b[i][j]!=='' && getTeam(b[i][j])===atkTeam && validateMoveMechanics(i,j,kr,kc,b[i][j],b[kr][kc],b)) return true;
+    return false;
 }
 
-function resignGame() { socket.emit("resign", { password: currentPassword, winner: myColor==='white'?'black':'white' }); }
-function offerDraw() { socket.emit("offer-draw", { password: currentPassword }); }
-function showDrawOffer() { document.getElementById('notification-area').innerHTML = `<div style="background:#444;padding:10px">Opponent offers draw. <button onclick="socket.emit('draw-response',{password:currentPassword,accepted:true})">Accept</button><button onclick="document.getElementById('notification-area').innerHTML=''">Decline</button></div>`; }
-function showStatusMessage(m) { const a = document.getElementById('notification-area'); a.innerText = m; setTimeout(()=>a.innerText='', 3000); }
+function moveIsLegal(fR, fC, tR, tC, p, team) {
+    if (!validateMoveMechanics(fR, fC, tR, tC, p, boardState[tR][tC], boardState)) return false;
+    const temp = boardState.map(r => [...r]); temp[tR][tC] = p; temp[fR][fC] = '';
+    if ((p==='♙'||p==='♟') && enPassantTarget?.r === tR && enPassantTarget?.c === tC) temp[fR][tC] = '';
+    return !isInCheck(team, temp);
+}
+
+function hasLegalMoves(team) {
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            const p = boardState[r][c];
+            if (p !== '' && getTeam(p) === team) {
+                for (let tr = 0; tr < 8; tr++) {
+                    for (let tc = 0; tc < 8; tc++) {
+                        if (moveIsLegal(r, c, tr, tc, p, team)) return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// --- 4. GAME ACTIONS ---
+function handleActualMove(from, to, isLocal) {
+    if (isGameOver) return;
+
+    const movingPiece = boardState[from.r][from.c];
+    const targetPiece = boardState[to.r][to.c];
+    const movingTeam = currentTurn;
+    const opponentTeam = movingTeam === 'white' ? 'black' : 'white';
+    
+    const isEP = (movingPiece === '♙' || movingPiece === '♟') && 
+                 enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
+    
+    let castle = null;
+    if ((movingPiece === '♔' || movingPiece === '♚') && Math.abs(from.c - to.c) === 2) {
+        castle = from.c < to.c ? 'short' : 'long';
+        const rO = to.c === 6 ? 7 : 0, rN = to.c === 6 ? 5 : 3;
+        boardState[to.r][rN] = boardState[to.r][rO];
+        boardState[to.r][rO] = '';
+    }
+
+    let note = getNotation(from.r, from.c, to.r, to.c, movingPiece, targetPiece, isEP, castle);
+
+    if (isEP) boardState[from.r][to.c] = '';
+    hasMoved[`${from.r},${from.c}`] = 1; 
+    boardState[to.r][to.c] = movingPiece;
+    boardState[from.r][from.c] = '';
+    
+    if (movingPiece === '♙' && to.r === 0) boardState[to.r][to.c] = '♕'; 
+    if (movingPiece === '♟' && to.r === 7) boardState[to.r][to.c] = '♛';
+
+    if (!isInfinite) {
+        if (movingTeam === 'white') whiteTime += increment;
+        else blackTime += increment;
+    }
+
+    // Switch Turn
+    currentTurn = opponentTeam; 
+
+    // Win Detection
+    const opponentInCheck = isInCheck(opponentTeam, boardState);
+    const opponentHasMoves = hasLegalMoves(opponentTeam);
+    let forcedStatus = null;
+
+    if (!opponentHasMoves) {
+        isGameOver = true;
+        if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
+        if (opponentInCheck) {
+            note += '#';
+            forcedStatus = `CHECKMATE! ${movingTeam.toUpperCase()} WINS`;
+        } else {
+            forcedStatus = "DRAW BY STALEMATE";
+        }
+    } else if (opponentInCheck) {
+        note += '+';
+    }
+
+    if (movingTeam === 'white') moveHistory.push({ w: note, b: '' });
+    else if (moveHistory.length > 0) moveHistory[moveHistory.length - 1].b = note;
+
+    enPassantTarget = (movingPiece === '♙' || movingPiece === '♟') && Math.abs(from.r - to.r) === 2 
+        ? { r: (from.r + to.r) / 2, c: to.c } 
+        : null;
+    selected = null;
+
+    if (isLocal) {
+        socket.emit("send-move", { 
+            password: currentPassword, 
+            move: { from, to }, 
+            whiteTime, 
+            blackTime 
+        });
+    }
+
+    render(forcedStatus);
+}
+
+function resignGame() {
+    if (isGameOver) return;
+    const winner = myColor === 'white' ? 'black' : 'white';
+    socket.emit("resign", { password: currentPassword, winner: winner });
+}
+
+function offerDraw() {
+    if (isGameOver) return;
+    socket.emit("offer-draw", { password: currentPassword });
+    showStatusMessage("Draw offer sent...");
+}
+
+function showDrawOffer() {
+    const area = document.getElementById('notification-area');
+    if (!area) return;
+    area.innerHTML = `<div class="draw-modal">Opponent offers a draw<div class="modal-btns"><button class="accept-btn" onclick="respondToDraw(true)">Accept</button><button class="decline-btn" onclick="respondToDraw(false)">Decline</button></div></div>`;
+}
+
+function respondToDraw(accepted) {
+    socket.emit("draw-response", { password: currentPassword, accepted: accepted });
+    document.getElementById('notification-area').innerHTML = '';
+    if (accepted) { isGameOver = true; if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance); render("GAME DRAWN BY AGREEMENT"); }
+}
+
+function showStatusMessage(msg) {
+    const area = document.getElementById('notification-area');
+    if (!area) return;
+    area.innerHTML = `<div class="status-msg">${msg}</div>`;
+    setTimeout(() => { area.innerHTML = ''; }, 3000);
+}
+
+// --- 5. RENDERER ---
+function render(forcedStatus) {
+    const layout = document.getElementById('main-layout');
+    if (!layout) return;
+    layout.replaceChildren();
+
+    const check = isInCheck(currentTurn, boardState);
+    let sTxt = forcedStatus || (isGameOver ? "GAME OVER" : `${currentTurn.toUpperCase()}'S TURN ${check ? '(CHECK!)' : ''}`);
+
+    const gameArea = document.createElement('div'); gameArea.id = 'game-area';
+    const createBar = (name, id) => {
+        const div = document.createElement('div'); div.className = 'player-bar';
+        div.innerHTML = `<span class="player-name">${name} ${myColor === id ? '(YOU)' : ''}</span><div id="timer-${id}" class="timer"></div>`;
+        return div;
+    };
+
+    if(myColor === 'black') gameArea.appendChild(createBar(whiteName, 'white'));
+    else gameArea.appendChild(createBar(blackName, 'black'));
+
+    const boardCont = document.createElement('div'); boardCont.id = 'board-container';
+    const boardEl = document.createElement('div'); boardEl.id = 'board';
+    
+    let hints = [];
+    if(selected && !isGameOver) {
+        const p = boardState[selected.r][selected.c];
+        for(let r=0; r<8; r++) for(let c=0; c<8; c++) if(moveIsLegal(selected.r, selected.c, r, c, p, currentTurn)) hints.push({r,c});
+    }
+
+    const range = (myColor === 'black') ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
+    for(let r of range) {
+        for(let c of range) {
+            const sq = document.createElement('div');
+            const piece = boardState[r][c];
+            sq.className = `square ${(r+c)%2===0 ? 'white-sq' : 'black-sq'}`;
+            if (check && !isGameOver && (piece === (currentTurn === 'white' ? '♔' : '♚'))) sq.classList.add('king-check');
+            if(selected?.r===r && selected?.c===c) sq.classList.add('selected');
+            if(hints.some(h => h.r===r && h.c===c)) {
+                const dot = document.createElement('div');
+                dot.className = piece === '' ? 'hint-dot' : 'hint-capture';
+                sq.appendChild(dot);
+            }
+            if(piece) {
+                const sp = document.createElement('span');
+                sp.className = `piece ${isWhite(piece)?'w-piece':'b-piece'}`;
+                sp.textContent = piece;
+                sq.appendChild(sp);
+            }
+            sq.onclick = () => {
+                if(isGameOver || currentTurn !== myColor) return;
+                if(selected) {
+                    if(moveIsLegal(selected.r, selected.c, r, c, boardState[selected.r][selected.c], currentTurn)) handleActualMove(selected, {r,c}, true);
+                    else { selected = getTeam(piece) === currentTurn ? {r,c} : null; render(); }
+                } else if(getTeam(piece) === currentTurn) { selected = {r,c}; render(); }
+            };
+            boardEl.appendChild(sq);
+        }
+    }
+    boardCont.appendChild(boardEl); gameArea.appendChild(boardCont);
+
+    if(myColor === 'black') gameArea.appendChild(createBar(blackName, 'black'));
+    else gameArea.appendChild(createBar(whiteName, 'white'));
+
+    layout.appendChild(gameArea);
+
+    const side = document.createElement('div'); side.id = 'side-panel';
+    side.innerHTML = `
+        <div id="status-box"><div id="status-text">${sTxt}</div></div>
+        <div id="notification-area"></div>
+        <div class="btn-row">
+            <button class="action-btn" onclick="offerDraw()" ${isGameOver ? 'disabled' : ''}>Offer Draw</button>
+            <button class="action-btn" onclick="resignGame()" ${isGameOver ? 'disabled' : ''}>Resign</button>
+        </div>
+        <div id="history-container"></div>
+    `;
+    const hCont = side.querySelector('#history-container');
+    moveHistory.forEach((m, i) => {
+        hCont.innerHTML += `<div class="history-row"><div class="move-num">${i+1}.</div><div class="move-val">${m.w}</div><div class="move-val">${m.b}</div></div>`;
+    });
+    layout.appendChild(side);
+    updateTimerDisplay();
+}
 
 function initGameState() {
     boardState = [['♜','♞','♝','♛','♚','♝','♞','♜'],['♟','♟','♟','♟','♟','♟','♟','♟'],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['♙','♙','♙','♙','♙','♙','♙','♙'],['♖','♘','♗','♕','♔','♗','♘','♖']];
@@ -329,18 +381,22 @@ function initGameState() {
     if (!isInfinite) {
         window.chessIntervalInstance = setInterval(() => {
             if (isGameOver) return;
-            currentTurn === 'white' ? whiteTime-- : blackTime--;
+            if (currentTurn === 'white') whiteTime--; else blackTime--;
             updateTimerDisplay();
-            if (whiteTime <= 0 || blackTime <= 0) { isGameOver = true; render(whiteTime<=0?"BLACK WINS":"WHITE WINS"); }
+            if (whiteTime <= 0 || blackTime <= 0) { 
+                isGameOver = true; clearInterval(window.chessIntervalInstance);
+                render(whiteTime <= 0 ? "BLACK WINS ON TIME" : "WHITE WINS ON TIME"); 
+            }
         }, 1000);
     }
     render();
 }
+
 function updateTimerDisplay() {
     const wT = document.getElementById('timer-white'), bT = document.getElementById('timer-black');
-    if (wT) { wT.textContent = formatTime(whiteTime); wT.className = `timer ${currentTurn==='white'?'active':''}`; }
-    if (bT) { bT.textContent = formatTime(blackTime); bT.className = `timer ${currentTurn==='black'?'active':''}`; }
+    if (wT) { wT.textContent = formatTime(whiteTime); wT.className = `timer ${currentTurn === 'white' && !isGameOver ? 'active' : ''}`; }
+    if (bT) { bT.textContent = formatTime(blackTime); bT.className = `timer ${currentTurn === 'black' && !isGameOver ? 'active' : ''}`; }
 }
-function formatTime(s) { if(isInfinite) return "∞"; return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
+function formatTime(s) { if(isInfinite) return "∞"; const dS=Math.max(0,s); return `${Math.floor(dS/60)}:${(dS%60).toString().padStart(2,'0')}`; }
 
 window.onload = showSetup;

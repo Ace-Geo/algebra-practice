@@ -246,7 +246,8 @@ function handleActualMove(from, to, isLocal) {
     if (movingPiece === '♙' && to.r === 0) boardState[to.r][to.c] = '♕'; 
     if (movingPiece === '♟' && to.r === 7) boardState[to.r][to.c] = '♛';
 
-    if (!isInfinite) {
+    // FIX: Only add increment if move is local to prevent double-adding
+    if (!isInfinite && isLocal) {
         if (team === 'white') whiteTime += increment;
         else blackTime += increment;
     }
@@ -363,15 +364,12 @@ function render(forcedStatus) {
             sq.onclick = () => {
                 if(isGameOver || currentTurn !== myColor) return;
                 if(selected) {
-                    // If clicking the SAME square again, unselect
                     if(selected.r === r && selected.c === c) {
                         selected = null; render();
                     } 
-                    // Else, try to move
                     else if(hints.some(h => h.r === r && h.c === c)) {
                         handleActualMove(selected, {r,c}, true);
                     }
-                    // Else, switch selection if clicking another of your own pieces
                     else { 
                         selected = getTeam(piece) === currentTurn ? {r,c} : null; render(); 
                     }

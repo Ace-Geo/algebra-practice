@@ -4,7 +4,7 @@ let whiteName = "White", blackName = "Black";
 let boardState, currentTurn, hasMoved, enPassantTarget, selected, isGameOver, isInfinite;
 let whiteTime, blackTime, increment, moveHistory = [];
 
-// --- 1. SOCKET LISTENERS ---
+// --- 1. SOCKET LISTENERS (Untouched) ---
 socket.on("player-assignment", (data) => {
     myColor = data.color;
     const s = data.settings;
@@ -46,7 +46,7 @@ socket.on("receive-move", (data) => {
 socket.on("opponent-resigned", (data) => {
     isGameOver = true;
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
-    render(`${data.winner.toUpperCase()} WINS BY RESIGNATION`);
+    render(`${data.winner.toUpperCase()()} WINS BY RESIGNATION`);
 });
 
 socket.on("draw-offered", () => showDrawOffer());
@@ -187,43 +187,53 @@ function hasLegalMoves(team) {
 
 // --- 4. GAME ACTIONS ---
 function handleActualMove(from, to, isLocal) {
-    if (isGameOver) return; // Prevent moves if game is already over
+    if (isGameOver) return;
 
     const movingPiece = boardState[from.r][from.c];
     const targetPiece = boardState[to.r][to.c];
-    const isEP = (movingPiece==='♙'||movingPiece==='♟') && enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
     const movingTeam = currentTurn;
     const opponentTeam = movingTeam === 'white' ? 'black' : 'white';
     
+    const isEP = (movingPiece === '♙' || movingPiece === '♟') && 
+                 enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
+    
     let castle = null;
-    if((movingPiece==='♔'||movingPiece==='♚') && Math.abs(from.c - to.c) === 2) {
+    if ((movingPiece === '♔' || movingPiece === '♚') && Math.abs(from.c - to.c) === 2) {
         castle = from.c < to.c ? 'short' : 'long';
         const rO = to.c === 6 ? 7 : 0, rN = to.c === 6 ? 5 : 3;
-        boardState[to.r][rN] = boardState[to.r][rO]; boardState[to.r][rO] = '';
+        boardState[to.r][rN] = boardState[to.r][rO];
+        boardState[to.r][rO] = '';
     }
 
     let note = getNotation(from.r, from.c, to.r, to.c, movingPiece, targetPiece, isEP, castle);
-    if(isEP) boardState[from.r][to.c] = '';
+
+    if (isEP) boardState[from.r][to.c] = '';
     hasMoved[`${from.r},${from.c}`] = 1; 
-    boardState[to.r][to.c] = movingPiece; boardState[from.r][from.c] = '';
+    boardState[to.r][to.c] = movingPiece;
+    boardState[from.r][from.c] = '';
     
-    if(movingPiece==='♙' && to.r===0) boardState[to.r][to.c] = '♕'; 
-    if(movingPiece==='♟' && to.r===7) boardState[to.r][to.c] = '♛';
+    if (movingPiece === '♙' && to.r === 0) boardState[to.r][to.c] = '♕'; 
+    if (movingPiece === '♟' && to.r === 7) boardState[to.r][to.c] = '♛';
 
-    if (!isInfinite) { if (movingTeam === 'white') whiteTime += increment; else blackTime += increment; }
+    if (!isInfinite) {
+        if (movingTeam === 'white') whiteTime += increment;
+        else blackTime += increment;
+    }
 
+    // Switch Turn
     currentTurn = opponentTeam; 
+
+    // Win Detection
     const opponentInCheck = isInCheck(opponentTeam, boardState);
     const opponentHasMoves = hasLegalMoves(opponentTeam);
     let forcedStatus = null;
 
     if (!opponentHasMoves) {
-        isGameOver = true; 
-        if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance); // Stop clock immediately
-        
-        if (opponentInCheck) { 
-            note += '#'; 
-            forcedStatus = `CHECKMATE! ${movingTeam.toUpperCase()} WINS`; 
+        isGameOver = true;
+        if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
+        if (opponentInCheck) {
+            note += '#';
+            forcedStatus = `CHECKMATE! ${movingTeam.toUpperCase()} WINS`;
         } else {
             forcedStatus = "DRAW BY STALEMATE";
         }
@@ -231,13 +241,23 @@ function handleActualMove(from, to, isLocal) {
         note += '+';
     }
 
-    if(movingTeam === 'white') moveHistory.push({w: note, b: ''}); 
-    else if(moveHistory.length > 0) moveHistory[moveHistory.length-1].b = note;
+    if (movingTeam === 'white') moveHistory.push({ w: note, b: '' });
+    else if (moveHistory.length > 0) moveHistory[moveHistory.length - 1].b = note;
 
-    enPassantTarget = (movingPiece==='♙'||movingPiece==='♟') && Math.abs(from.r - to.r) === 2 ? {r:(from.r+to.r)/2, c: to.c} : null;
+    enPassantTarget = (movingPiece === '♙' || movingPiece === '♟') && Math.abs(from.r - to.r) === 2 
+        ? { r: (from.r + to.r) / 2, c: to.c } 
+        : null;
     selected = null;
-    
-    if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to }, whiteTime, blackTime });
+
+    if (isLocal) {
+        socket.emit("send-move", { 
+            password: currentPassword, 
+            move: { from, to }, 
+            whiteTime, 
+            blackTime 
+        });
+    }
+
     render(forcedStatus);
 }
 

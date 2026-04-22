@@ -3,7 +3,6 @@ let myColor = null, currentPassword = null, tempName = "";
 let whiteName = "White", blackName = "Black"; 
 let boardState, currentTurn, hasMoved, enPassantTarget, selected, isGameOver, isInfinite;
 let whiteTime, blackTime, increment, moveHistory = [];
-let rematchRequested = false;
 
 // --- 1. SOCKET LISTENERS ---
 socket.on("player-assignment", (data) => {
@@ -47,7 +46,6 @@ socket.on("receive-move", (data) => {
 socket.on("opponent-resigned", (data) => {
     isGameOver = true;
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
-    showResultModal(`${data.winner.toUpperCase()} WINS BY RESIGNATION`);
     render(`${data.winner.toUpperCase()} WINS BY RESIGNATION`);
 });
 
@@ -57,26 +55,10 @@ socket.on("draw-resolved", (data) => {
     if (data.accepted) {
         isGameOver = true;
         if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
-        showResultModal("GAME DRAWN BY AGREEMENT");
         render("GAME DRAWN BY AGREEMENT");
     } else {
         showStatusMessage("Draw offer declined");
     }
-});
-
-socket.on("rematch-offered", () => {
-    const btn = document.getElementById('rematch-btn');
-    if (btn) {
-        btn.innerText = "Accept Rematch";
-        btn.classList.add('rematch-ready');
-    }
-});
-
-socket.on("rematch-start", () => {
-    rematchRequested = false;
-    document.getElementById('game-over-overlay')?.remove();
-    document.getElementById('reopen-results-btn')?.remove();
-    initGameState();
 });
 
 socket.on("error-msg", (msg) => alert(msg));
@@ -264,6 +246,7 @@ function handleActualMove(from, to, isLocal) {
     if (movingPiece === '♙' && to.r === 0) boardState[to.r][to.c] = '♕'; 
     if (movingPiece === '♟' && to.r === 7) boardState[to.r][to.c] = '♛';
 
+    // FIX: Only add increment if move is local to prevent double-adding
     if (!isInfinite && isLocal) {
         if (team === 'white') whiteTime += increment;
         else blackTime += increment;
@@ -287,7 +270,6 @@ function handleActualMove(from, to, isLocal) {
         } else {
             forcedStatus = "DRAW BY STALEMATE";
         }
-        showResultModal(forcedStatus);
     } else if (inCheck) {
         note += '+';
     }
@@ -321,7 +303,7 @@ function showDrawOffer() {
 function respondToDraw(accepted) {
     socket.emit("draw-response", { password: currentPassword, accepted: accepted });
     document.getElementById('notification-area').innerHTML = '';
-    if (accepted) { isGameOver = true; if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance); showResultModal("GAME DRAWN BY AGREEMENT"); render("GAME DRAWN BY AGREEMENT"); }
+    if (accepted) { isGameOver = true; if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance); render("GAME DRAWN BY AGREEMENT"); }
 }
 
 function showStatusMessage(msg) {
@@ -331,46 +313,7 @@ function showStatusMessage(msg) {
     setTimeout(() => { area.innerHTML = ''; }, 3000);
 }
 
-// --- 5. RESULT MODAL HANDLERS ---
-function showResultModal(txt) {
-    document.getElementById('game-over-overlay')?.remove();
-    const overlay = document.createElement('div');
-    overlay.id = 'game-over-overlay';
-    overlay.innerHTML = `
-        <div class="result-card">
-            <h2>Game Over</h2>
-            <p id="result-desc">${txt}</p>
-            <div class="modal-btns">
-                <button id="rematch-btn" onclick="requestRematch()">Request Rematch</button>
-                <button class="action-btn" onclick="closeModal()">View Position</button>
-                <button class="action-btn" style="background:#444" onclick="location.reload()">Exit to Lobby</button>
-            </div>
-        </div>`;
-    document.body.appendChild(overlay);
-}
-
-function requestRematch() {
-    if (rematchRequested) return;
-    rematchRequested = true;
-    document.getElementById('rematch-btn').innerText = "Waiting...";
-    document.getElementById('rematch-btn').disabled = true;
-    socket.emit("rematch-request", { password: currentPassword });
-}
-
-function closeModal() {
-    document.getElementById('game-over-overlay').style.display = 'none';
-    if (!document.getElementById('reopen-results-btn')) {
-        const btn = document.createElement('button');
-        btn.id = 'reopen-results-btn';
-        btn.className = 'action-btn';
-        btn.style.marginTop = '10px';
-        btn.textContent = 'View Game Result';
-        btn.onclick = () => document.getElementById('game-over-overlay').style.display = 'flex';
-        document.getElementById('side-panel').appendChild(btn);
-    }
-}
-
-// --- 6. RENDERER ---
+// --- 5. RENDERER ---
 function render(forcedStatus) {
     const layout = document.getElementById('main-layout');
     if (!layout) return;
@@ -461,7 +404,6 @@ function initGameState() {
             updateTimerDisplay();
             if (whiteTime <= 0 || blackTime <= 0) { 
                 isGameOver = true; clearInterval(window.chessIntervalInstance);
-                showResultModal(whiteTime <= 0 ? "BLACK WINS ON TIME" : "WHITE WINS ON TIME");
                 render(whiteTime <= 0 ? "BLACK WINS ON TIME" : "WHITE WINS ON TIME"); 
             }
         }, 1000);

@@ -1,5 +1,5 @@
 const socket = io("https://algebra-but-better.onrender.com");
-let myColor = null, currentPassword = null;
+let myColor = null, currentPassword = null, tempName = ""; 
 let whiteName = "White", blackName = "Black"; 
 let boardState, currentTurn, hasMoved, enPassantTarget, selected, isGameOver, isInfinite;
 let whiteTime, blackTime, increment, moveHistory;
@@ -14,10 +14,10 @@ socket.on("player-assignment", (data) => {
     isInfinite = (whiteTime === 0);
     
     if (myColor === 'white') {
-        whiteName = document.getElementById('uName')?.value || "White";
+        whiteName = tempName || "White";
         blackName = data.oppName;
     } else {
-        blackName = document.getElementById('joinName')?.value || "Black";
+        blackName = tempName || "Black";
         whiteName = data.oppName;
     }
     
@@ -110,10 +110,11 @@ function switchTab(type) {
 
 function createRoom() {
     currentPassword = document.getElementById('roomPass').value;
+    tempName = document.getElementById('uName').value;
     if(!currentPassword) return alert("Please enter a password");
     socket.emit("create-room", {
         password: currentPassword,
-        name: document.getElementById('uName').value,
+        name: tempName,
         mins: document.getElementById('tMin').value || 0,
         secs: document.getElementById('tSec').value || 0,
         inc: document.getElementById('tInc').value || 0,
@@ -123,17 +124,18 @@ function createRoom() {
 
 function joinRoom() {
     currentPassword = document.getElementById('joinPass').value;
+    tempName = document.getElementById('joinName').value;
     if(!currentPassword) return alert("Please enter room password");
     socket.emit("join-attempt", { 
         password: currentPassword, 
-        name: document.getElementById('joinName').value 
+        name: tempName 
     });
 }
 
 function confirmJoin(color) {
     socket.emit("confirm-join", { 
         password: currentPassword, 
-        name: document.getElementById('joinName').value,
+        name: tempName,
         color: color
     });
 }
@@ -213,7 +215,6 @@ function handleActualMove(from, to, isLocal) {
     const movingTeam = currentTurn;
     const opponentTeam = movingTeam === 'white' ? 'black' : 'white';
     
-    // Castling execution
     let castle = null;
     if((movingPiece==='♔'||movingPiece==='♚') && Math.abs(from.c - to.c) === 2) {
         castle = to.c === 6 ? 'short' : 'long';
@@ -223,23 +224,19 @@ function handleActualMove(from, to, isLocal) {
 
     let note = getNotation(from.r, from.c, to.r, to.c, movingPiece, targetPiece, isEP, castle);
     
-    // Core move
     if(isEP) boardState[from.r][to.c] = '';
     hasMoved[`${from.r},${from.c}`] = 1; 
     boardState[to.r][to.c] = movingPiece; boardState[from.r][from.c] = '';
     
-    // Promotion
     if(movingPiece==='♙' && to.r===0) boardState[to.r][to.c] = '♕'; 
     if(movingPiece==='♟' && to.r===7) boardState[to.r][to.c] = '♛';
 
-    // Time Increment logic
     if (!isInfinite) {
         if (movingTeam === 'white') whiteTime += increment;
         else blackTime += increment;
     }
 
     currentTurn = opponentTeam; 
-    
     const opponentInCheck = isInCheck(opponentTeam, boardState);
     const opponentHasMoves = hasLegalMoves(opponentTeam);
     let forcedStatus = null;
@@ -275,7 +272,6 @@ function getNotation(fR, fC, tR, tC, piece, target, isEP, castle) {
     return p + cap + files[tC] + rows[tR];
 }
 
-// --- 4. RENDERER ---
 function render(forcedStatus) {
     const layout = document.getElementById('main-layout');
     if (!layout) return;
@@ -357,7 +353,6 @@ function render(forcedStatus) {
     updateTimerDisplay();
 }
 
-// --- 5. INITIALIZATION ---
 function initGameState() {
     boardState = [['♜','♞','♝','♛','♚','♝','♞','♜'],['♟','♟','♟','♟','♟','♟','♟','♟'],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['♙','♙','♙','♙','♙','♙','♙','♙'],['♖','♘','♗','♕','♔','♗','♘','♖']];
     currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false; selected = null;

@@ -10,7 +10,6 @@ body {
     overflow: hidden; 
 }
 
-/* Lobby / Setup - Untouched */
 #setup-overlay { 
     position: fixed; 
     inset: 0; 
@@ -41,7 +40,6 @@ body {
 .start-btn { width: 100%; padding: 12px; background: #779556; border: none; color: #fff; font-weight: bold; cursor: pointer; border-radius: 6px; font-size: 16px; margin-top: 10px; }
 .action-btn { background: #3c3a37; border: none; color: #bababa; padding: 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
 
-/* Main Game Layout */
 #main-layout { 
     display: flex; 
     gap: 30px; 
@@ -51,11 +49,11 @@ body {
 #game-area { 
     display: flex; 
     flex-direction: column; 
-    width: 536px; /* 512px board + 24px total padding */
+    width: 536px; 
 }
 
 #board-container {
-    background: #262421; /* Dark grey border */
+    background: #262421; 
     padding: 12px; 
     box-sizing: border-box;
 }
@@ -109,7 +107,6 @@ body {
 }
 .timer.active { background: #fff; color: #000; font-weight: bold; }
 
-/* Side Panel & History */
 #side-panel { 
     width: 260px; 
     background: #262421; 
@@ -181,3 +178,34 @@ body {
 .modal-btns button { flex: 1; padding: 8px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 11px; }
 .accept-btn { background: #779556; color: #fff; }
 .decline-btn { background: #312e2b; color: #bababa; }
+
+/* --- GAME OVER MODAL --- */
+#game-over-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 2000;
+}
+.result-card {
+    background: #262421;
+    padding: 30px;
+    border-radius: 12px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    border: 2px solid #779556;
+    width: 320px;
+}
+.result-card h2 { color: #779556; margin-top: 0; text-transform: uppercase; }
+.modal-btns-vertical { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+#rematch-btn { background: #779556; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 16px; }
+#rematch-btn:disabled { background: #4a5d36; cursor: not-allowed; }
+.rematch-ready { animation: pulse 1.5s infinite; background: #8dbb5c !important; }
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}

@@ -5,7 +5,7 @@ let boardState, currentTurn, hasMoved, enPassantTarget, selected, isGameOver, is
 let whiteTime, blackTime, increment, moveHistory = [];
 let rematchRequested = false;
 
-// --- 1. SOCKET LISTENERS ---
+// --- 1. SOCKET LISTENERS ---f
 socket.on("player-assignment", (data) => {
     myColor = data.color;
     const s = data.settings;

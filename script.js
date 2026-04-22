@@ -8,32 +8,38 @@ let whiteTime, blackTime;
 socket.on("error-msg", (msg) => alert(msg));
 
 socket.on("waiting-for-opponent", () => {
-    document.getElementById('setup-overlay').innerHTML = `
-        <div class="setup-card">
-            <h2>Room Created</h2>
-            <p>Waiting for an opponent...</p>
-            <p>Password: <b>${currentPassword}</b></p>
-            <button class="secondary-btn" onclick="location.reload()">Cancel</button>
-        </div>`;
+    const overlay = document.getElementById('setup-overlay');
+    if (overlay) {
+        overlay.innerHTML = `
+            <div class="setup-card">
+                <h2>Room Created</h2>
+                <p>Waiting for an opponent...</p>
+                <p>Password: <b>${currentPassword}</b></p>
+                <button class="secondary-btn" onclick="location.reload()">Cancel</button>
+            </div>`;
+    }
 });
 
 socket.on("confirm-settings", (data) => {
     const { settings, creatorName } = data;
     const timeText = (settings.mins == 0 && settings.secs == 0) ? "Unlimited" : `${settings.mins}m ${settings.secs}s + ${settings.inc}s`;
     
-    document.getElementById('setup-overlay').innerHTML = `
-        <div class="setup-card">
-            <h2>Match Found</h2>
-            <p>Host: <b>${creatorName}</b></p>
-            <p>Time: ${timeText}</p>
-            <button class="start-btn" id="confirmJoin">JOIN GAME</button>
-            <button class="secondary-btn" onclick="location.reload()">DECLINE</button>
-        </div>`;
-    
-    document.getElementById('confirmJoin').onclick = () => {
-        const uName = localStorage.getItem('lastUName') || "Player 2";
-        socket.emit("join-confirmed", { password: currentPassword, name: uName });
-    };
+    const overlay = document.getElementById('setup-overlay');
+    if (overlay) {
+        overlay.innerHTML = `
+            <div class="setup-card">
+                <h2>Match Found</h2>
+                <p>Host: <b>${creatorName}</b></p>
+                <p>Time: ${timeText}</p>
+                <button class="start-btn" id="confirmJoin">JOIN GAME</button>
+                <button class="secondary-btn" onclick="location.reload()">DECLINE</button>
+            </div>`;
+        
+        document.getElementById('confirmJoin').onclick = () => {
+            const uName = localStorage.getItem('lastUName') || "Player 2";
+            socket.emit("join-confirmed", { password: currentPassword, name: uName });
+        };
+    }
 });
 
 socket.on("game-start", (data) => {
@@ -42,7 +48,8 @@ socket.on("game-start", (data) => {
     whiteTime = (parseInt(s.mins) * 60) + parseInt(s.secs);
     blackTime = whiteTime; increment = parseInt(s.inc);
     isInfinite = (whiteTime === 0);
-    document.getElementById('setup-overlay').style.display = 'none';
+    const overlay = document.getElementById('setup-overlay');
+    if (overlay) overlay.style.display = 'none';
     initGameState();
 });
 
@@ -88,6 +95,7 @@ function moveIsLegal(fR, fC, tR, tC, p, team) {
     const k = team === 'white' ? '♔' : '♚';
     let kr, kc;
     for(let r=0; r<8; r++) for(let c=0; c<8; c++) if(temp[r][c]===k){kr=r;kc=c;}
+    if (kr === undefined) return false;
     const atk = team==='white'?'black':'white';
     for(let i=0; i<8; i++) for(let j=0; j<8; j++) 
         if(temp[i][j]!=='' && getTeam(temp[i][j])===atk && validateMoveMechanics(i,j,kr,kc,temp[i][j],temp[kr][kc],temp)) return false;
@@ -133,7 +141,6 @@ function render() {
             
             if (selected?.r===r && selected?.c===c) sq.classList.add('selected');
 
-            // Draw Dots
             if (selected && moveIsLegal(selected.r, selected.c, r, c, boardState[selected.r][selected.c], currentTurn)) {
                 const hint = document.createElement('div');
                 hint.className = piece === '' ? 'hint-dot' : 'hint-capture';
@@ -189,7 +196,20 @@ function updateTimerDisplay() {
 }
 
 function showSetup() {
-    const overlay = document.getElementById('setup-overlay');
+    // --- DOM FAILSAFE ---
+    let overlay = document.getElementById('setup-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'setup-overlay';
+        document.body.appendChild(overlay);
+    }
+    let layout = document.getElementById('main-layout');
+    if (!layout) {
+        layout = document.createElement('div');
+        layout.id = 'main-layout';
+        document.body.appendChild(layout);
+    }
+
     let tab = 'create';
     const draw = () => {
         overlay.innerHTML = `

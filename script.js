@@ -1,12 +1,28 @@
 const socket = io("https://algebra-but-better.onrender.com");
-let myColor = null, currentPassword = null, tempName = ""; 
-let whiteName = "White", blackName = "Black"; 
-let boardState, currentTurn, hasMoved, enPassantTarget, selected, isGameOver, isInfinite;
-let whiteTime, blackTime, increment, moveHistory = [];
-let rematchRequested = false;
-let gameSettings = null; 
 
-// --- 1. SOCKET LISTENERS ---
+let myColor = null;
+let currentPassword = null;
+let tempName = "";
+let whiteName = "White";
+let blackName = "Black";
+
+let boardState;
+let currentTurn;
+let hasMoved;
+let enPassantTarget;
+let selected;
+let isGameOver;
+let isInfinite;
+
+let whiteTime;
+let blackTime;
+let increment;
+let moveHistory = [];
+let rematchRequested = false;
+let gameSettings = null;
+
+// --- SOCKET LISTENERS ---
+
 socket.on("player-assignment", (data) => {
     myColor = data.color;
     gameSettings = data.settings;
@@ -19,21 +35,44 @@ socket.on("player-assignment", (data) => {
         whiteName = data.oppName;
     }
     
-    document.getElementById('setup-overlay')?.remove();
+    const overlay = document.getElementById('setup-overlay');
+    if (overlay) overlay.remove();
+    
     initGameState();
-    appendChatMessage("System", `Game started! You are ${myColor.toUpperCase()}.`, true);
+    appendChatMessage("System", `Game started! You are playing as ${myColor.toUpperCase()}.`, true);
 });
 
 socket.on("room-created", (data) => {
     const card = document.querySelector('.setup-card');
-    card.innerHTML = `<h2 style="color: #779556">Room Created</h2><p>Waiting for someone to join with password: <br><strong>${data.password}</strong></p><div class="loader"></div><button class="action-btn" onclick="location.reload()">Cancel</button>`;
+    card.innerHTML = `
+        <h2 style="color: #779556">Room Created</h2>
+        <p>Waiting for opponent...</p>
+        <div style="background: #1a1a1a; padding: 15px; border-radius: 8px; margin: 20px 0;">
+            <span style="color: #bababa; font-size: 12px; display: block; margin-bottom: 5px;">ROOM PASSWORD</span>
+            <strong style="font-size: 24px; letter-spacing: 2px;">${data.password}</strong>
+        </div>
+        <button class="action-btn" onclick="location.reload()">Cancel</button>
+    `;
 });
 
 socket.on("preview-settings", (data) => {
     const card = document.querySelector('.setup-card');
     const s = data.settings;
-    let displayColor = data.creatorColorPref === 'white' ? "BLACK" : (data.creatorColorPref === 'black' ? "WHITE" : "RANDOM");
-    card.innerHTML = `<h2 style="color: #779556">Join Room?</h2><div style="text-align: left; margin-bottom: 20px; background: #1a1a1a; padding: 15px; border-radius: 8px;"><p><strong>Host:</strong> ${data.creatorName}</p><p><strong>Time:</strong> ${s.mins}m ${s.secs}s</p><p><strong>Inc:</strong> ${s.inc}s</p><p><strong>Your Side:</strong> ${displayColor}</p></div><button class="start-btn" onclick="confirmJoin()">CONFIRM & START</button><button class="action-btn" style="margin-top:10px" onclick="location.reload()">Back</button>`;
+    let displayColor = "RANDOM";
+    if (data.creatorColorPref === 'white') displayColor = "BLACK";
+    if (data.creatorColorPref === 'black') displayColor = "WHITE";
+
+    card.innerHTML = `
+        <h2 style="color: #779556">Join Room?</h2>
+        <div style="text-align: left; margin-bottom: 20px; background: #1a1a1a; padding: 15px; border-radius: 8px;">
+            <p style="margin: 5px 0;"><strong>Host:</strong> ${data.creatorName}</p>
+            <p style="margin: 5px 0;"><strong>Time:</strong> ${s.mins}m ${s.secs}s</p>
+            <p style="margin: 5px 0;"><strong>Increment:</strong> ${s.inc}s</p>
+            <p style="margin: 5px 0;"><strong>Your Side:</strong> ${displayColor}</p>
+        </div>
+        <button class="start-btn" onclick="confirmJoin()">CONFIRM & START</button>
+        <button class="action-btn" style="margin-top: 10px; width: 100%;" onclick="location.reload()">Back</button>
+    `;
 });
 
 socket.on("receive-move", (data) => {
@@ -54,7 +93,9 @@ socket.on("opponent-resigned", (data) => {
     render(status);
 });
 
-socket.on("draw-offered", () => showDrawOffer());
+socket.on("draw-offered", () => {
+    showDrawOffer();
+});
 
 socket.on("draw-resolved", (data) => {
     if (data.accepted) {
@@ -83,66 +124,29 @@ socket.on("rematch-start", () => {
     whiteName = blackName;
     blackName = oldWhite;
 
-    document.getElementById('game-over-overlay')?.remove();
-    document.getElementById('reopen-results-btn')?.remove();
+    const overlay = document.getElementById('game-over-overlay');
+    if (overlay) overlay.remove();
+    const reopenBtn = document.getElementById('reopen-results-btn');
+    if (reopenBtn) reopenBtn.remove();
+
     initGameState();
-    appendChatMessage("System", "Rematch started! Colors swapped.", true);
+    appendChatMessage("System", "Rematch started! Colors have been swapped.", true);
 });
 
-socket.on("error-msg", (msg) => alert(msg));
+socket.on("error-msg", (msg) => {
+    alert(msg);
+});
 
-// --- 2. LOBBY & CHAT UI ---
-function showSetup() {
-    const overlay = document.createElement('div');
-    overlay.id = 'setup-overlay';
-    overlay.innerHTML = `
-        <div class="setup-card">
-            <div class="tabs"><button id="tab-create" class="active" onclick="switchTab('create')">Create</button><button id="tab-join" onclick="switchTab('join')">Join</button></div>
-            <div id="create-sect">
-                <div class="input-group"><label>Room Password</label><input id="roomPass" placeholder="Secret Code"></div>
-                <div class="input-group"><label>Username</label><input id="uName" value="Player 1"></div>
-                <div class="input-group"><label>Time Control</label><div style="display:flex; gap:5px;"><input type="number" id="tMin" value="10"><input type="number" id="tSec" value="0"><input type="number" id="tInc" value="0"></div></div>
-                <div class="input-group"><label>Play As</label><select id="colorPref"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
-                <button class="start-btn" onclick="createRoom()">CREATE</button>
-            </div>
-            <div id="join-sect" style="display:none;">
-                <div class="input-group"><label>Room Password</label><input id="joinPass" placeholder="Password"></div>
-                <div class="input-group"><label>Username</label><input id="joinName" value="Player 2"></div>
-                <button class="start-btn" onclick="joinRoom()">FIND ROOM</button>
-            </div>
-        </div>`;
-    document.body.appendChild(overlay);
-}
-
-function switchTab(t) {
-    document.getElementById('create-sect').style.display = t === 'create' ? 'block' : 'none';
-    document.getElementById('join-sect').style.display = t === 'join' ? 'block' : 'none';
-    document.getElementById('tab-create').className = t === 'create' ? 'active' : '';
-    document.getElementById('tab-join').className = t === 'join' ? 'active' : '';
-}
-
-function createRoom() {
-    currentPassword = document.getElementById('roomPass').value;
-    tempName = document.getElementById('uName').value;
-    if(!currentPassword) return alert("Enter password");
-    socket.emit("create-room", { password: currentPassword, name: tempName, mins: document.getElementById('tMin').value, secs: document.getElementById('tSec').value, inc: document.getElementById('tInc').value, colorPref: document.getElementById('colorPref').value });
-}
-
-function joinRoom() {
-    currentPassword = document.getElementById('joinPass').value;
-    tempName = document.getElementById('joinName').value;
-    if(!currentPassword) return alert("Enter password");
-    socket.emit("join-attempt", { password: currentPassword });
-}
-
-function confirmJoin() { socket.emit("confirm-join", { password: currentPassword, name: tempName }); }
+// --- CHAT FUNCTIONS ---
 
 function appendChatMessage(sender, message, isSystem = false) {
     const msgContainer = document.getElementById('chat-messages');
     if (!msgContainer) return;
+    
     const div = document.createElement('div');
     div.className = isSystem ? 'chat-msg system' : 'chat-msg';
     div.innerHTML = isSystem ? message : `<b>${sender}:</b> ${message}`;
+    
     msgContainer.appendChild(div);
     msgContainer.scrollTop = msgContainer.scrollHeight;
 }
@@ -150,117 +154,175 @@ function appendChatMessage(sender, message, isSystem = false) {
 function sendChatMessage() {
     const input = document.getElementById('chat-input');
     const msg = input.value.trim();
+    
     if (msg && currentPassword) {
         const myName = (myColor === 'white' ? whiteName : blackName);
-        socket.emit("send-chat", { password: currentPassword, message: msg, senderName: myName });
+        socket.emit("send-chat", {
+            password: currentPassword,
+            message: msg,
+            senderName: myName
+        });
         appendChatMessage("You", msg);
         input.value = '';
     }
 }
 
-// --- 3. CORE CHESS LOGIC ---
-const isWhite = (c) => ['♖', '♘', '♗', '♕', '♔', '♙'].includes(c);
-const getTeam = (c) => c === '' ? null : (isWhite(c) ? 'white' : 'black');
-const getPieceNotation = (p) => {
-    const map = {'♖':'R','♘':'N','♗':'B','♕':'Q','♔':'K','♜':'R','♞':'N','♝':'B','♛':'Q','♚':'K'};
-    return map[p] || '';
-};
+// --- CORE CHESS LOGIC ---
 
-function getNotation(fR, fC, tR, tC, piece, target, isEP, castle) {
-    if (castle) return castle === 'short' ? 'O-O' : 'O-O-O';
-    const files = ['a','b','c','d','e','f','g','h'], rows = ['8','7','6','5','4','3','2','1'];
-    let p = getPieceNotation(piece), cap = (target !== '' || isEP) ? 'x' : '';
-    if (p === '' && cap) p = files[fC]; 
-    return p + cap + files[tC] + rows[tR];
+const isWhite = (piece) => ['♖', '♘', '♗', '♕', '♔', '♙'].includes(piece);
+const getTeam = (piece) => piece === '' ? null : (isWhite(piece) ? 'white' : 'black');
+
+function getPieceNotation(piece) {
+    const map = {
+        '♖': 'R', '♘': 'N', '♗': 'B', '♕': 'Q', '♔': 'K',
+        '♜': 'R', '♞': 'N', '♝': 'B', '♛': 'Q', '♚': 'K'
+    };
+    return map[piece] || '';
 }
 
-function canAttackSquare(fR, fC, tR, tC, p, b) {
-    const dr = tR-fR, dc = tC-fC, adr = Math.abs(dr), adc = Math.abs(dc), team = getTeam(p);
+function getNotation(fromR, fromC, toR, toC, piece, target, isEP, castle) {
+    if (castle) return castle === 'short' ? 'O-O' : 'O-O-O';
+    const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const rows = ['8', '7', '6', '5', '4', '3', '2', '1'];
+    let moveStr = getPieceNotation(piece);
+    let capture = (target !== '' || isEP) ? 'x' : '';
+    if (moveStr === '' && capture) moveStr = files[fromC];
+    return moveStr + capture + files[toC] + rows[toR];
+}
+
+function canAttackSquare(fromR, fromC, toR, toC, piece, board) {
+    const dr = toR - fromR;
+    const dc = toC - fromC;
+    const adr = Math.abs(dr);
+    const adc = Math.abs(dc);
+    const team = getTeam(piece);
+
     const clearPath = (r1, c1, r2, c2) => {
-        const sr = r2 === r1 ? 0 : (r2-r1)/Math.abs(r2-r1), sc = c2 === c1 ? 0 : (c2-c1)/Math.abs(c2-c1);
-        let cr = r1+sr, cc = c1+sc;
-        while(cr !== r2 || cc !== c2) { if (b[cr][cc] !== '') return false; cr+=sr; cc+=sc; }
+        const stepR = r2 === r1 ? 0 : (r2 - r1) / Math.abs(r2 - r1);
+        const stepC = c2 === c1 ? 0 : (c2 - c1) / Math.abs(c2 - c1);
+        let currR = r1 + stepR;
+        let currC = c1 + stepC;
+        while (currR !== r2 || currC !== c2) {
+            if (board[currR][currC] !== '') return false;
+            currR += stepR;
+            currC += stepC;
+        }
         return true;
     };
-    if (p === '♙' || p === '♟') {
+
+    if (piece === '♙' || piece === '♟') {
         const dir = team === 'white' ? -1 : 1;
         return adc === 1 && dr === dir;
     }
-    if (['♖','♜'].includes(p)) return (dr===0 || dc===0) && clearPath(fR,fC,tR,tC);
-    if (['♘','♞'].includes(p)) return (adr===2 && adc===1) || (adr===1 && adc===2);
-    if (['♗','♝'].includes(p)) return adr===adc && clearPath(fR,fC,tR,tC);
-    if (['♕','♛'].includes(p)) return (adr===adc || dr===0 || dc===0) && clearPath(fR,fC,tR,tC);
-    if (['♔','♚'].includes(p)) return adr<=1 && adc<=1;
+    if (piece === '♖' || piece === '♜') return (dr === 0 || dc === 0) && clearPath(fromR, fromC, toR, toC);
+    if (piece === '♘' || piece === '♞') return (adr === 2 && adc === 1) || (adr === 1 && adc === 2);
+    if (piece === '♗' || piece === '♝') return adr === adc && clearPath(fromR, fromC, toR, toC);
+    if (piece === '♕' || piece === '♛') return (adr === adc || dr === 0 || dc === 0) && clearPath(fromR, fromC, toR, toC);
+    if (piece === '♔' || piece === '♚') return adr <= 1 && adc <= 1;
     return false;
 }
 
-function canMoveTo(fR, fC, tR, tC, p, b) {
-    const dr = tR-fR, dc = tC-fC, adr = Math.abs(dr), adc = Math.abs(dc), team = getTeam(p);
-    const target = b[tR][tC];
+function canMoveTo(fromR, fromC, toR, toC, piece, board) {
+    const dr = toR - fromR;
+    const dc = toC - fromC;
+    const adr = Math.abs(dr);
+    const adc = Math.abs(dc);
+    const team = getTeam(piece);
+    const target = board[toR][toC];
+
     if (target !== '' && getTeam(target) === team) return false;
+
     const clearPath = (r1, c1, r2, c2) => {
-        const sr = r2 === r1 ? 0 : (r2-r1)/Math.abs(r2-r1), sc = c2 === c1 ? 0 : (c2-c1)/Math.abs(c2-c1);
-        let cr = r1+sr, cc = c1+sc;
-        while(cr !== r2 || cc !== c2) { if (b[cr][cc] !== '') return false; cr+=sr; cc+=sc; }
+        const stepR = r2 === r1 ? 0 : (r2 - r1) / Math.abs(r2 - r1);
+        const stepC = c2 === c1 ? 0 : (c2 - c1) / Math.abs(c2 - c1);
+        let currR = r1 + stepR;
+        let currC = c1 + stepC;
+        while (currR !== r2 || currC !== c2) {
+            if (board[currR][currC] !== '') return false;
+            currR += stepR;
+            currC += stepC;
+        }
         return true;
     };
-    if (p === '♙' || p === '♟') {
+
+    if (piece === '♙' || piece === '♟') {
         const dir = team === 'white' ? -1 : 1;
         if (dc === 0 && target === '') {
-            return dr === dir || (dr === 2*dir && fR === (team === 'white'?6:1) && b[fR+dir][fC] === '');
+            if (dr === dir) return true;
+            if (dr === 2 * dir && fromR === (team === 'white' ? 6 : 1) && board[fromR + dir][fromC] === '') return true;
         }
         if (adc === 1 && dr === dir) {
-            return target !== '' || (enPassantTarget && enPassantTarget.r === tR && enPassantTarget.c === tC);
+            if (target !== '') return true;
+            if (enPassantTarget && enPassantTarget.r === toR && enPassantTarget.c === toC) return true;
         }
         return false;
     }
-    if (['♔','♚'].includes(p) && adc === 2) {
-        if (hasMoved[`${fR},${fC}`] || isSquareAttacked(fR, fC, team === 'white' ? 'black' : 'white', b)) return false;
-        const rC = tC === 6 ? 7 : 0, rPiece = b[fR][rC];
-        return rPiece !== '' && !hasMoved[`${fR},${rC}`] && clearPath(fR, fC, fR, rC);
+
+    if ((piece === '♔' || piece === '♚') && adc === 2) {
+        if (hasMoved[`${fromR},${fromC}`]) return false;
+        if (isSquareAttacked(fromR, fromC, team === 'white' ? 'black' : 'white', board)) return false;
+        const rookCol = toC === 6 ? 7 : 0;
+        const rookPiece = board[fromR][rookCol];
+        if (rookPiece === '' || hasMoved[`${fromR},${rookCol}`]) return false;
+        return clearPath(fromR, fromC, fromR, rookCol);
     }
-    return canAttackSquare(fR, fC, tR, tC, p, b);
+
+    return canAttackSquare(fromR, fromC, toR, toC, piece, board);
 }
 
-function isSquareAttacked(r, c, attackerTeam, b) {
-    for(let i=0; i<8; i++) {
-        for(let j=0; j<8; j++) {
-            const p = b[i][j];
-            if(p !== '' && getTeam(p) === attackerTeam && canAttackSquare(i, j, r, c, p, b)) return true;
+function isSquareAttacked(r, c, attackerTeam, board) {
+    for (let i = 0; i < 8; i++) {
+        for (let j = 0; j < 8; j++) {
+            const piece = board[i][j];
+            if (piece !== '' && getTeam(piece) === attackerTeam) {
+                if (canAttackSquare(i, j, r, c, piece, board)) return true;
+            }
         }
     }
     return false;
 }
 
-function getKingPos(team, b) {
-    const k = team === 'white' ? '♔' : '♚';
-    for(let r=0; r<8; r++) for(let c=0; c<8; c++) if(b[r][c] === k) return {r, c};
+function getKingPos(team, board) {
+    const king = team === 'white' ? '♔' : '♚';
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            if (board[r][c] === king) return { r, c };
+        }
+    }
     return null;
 }
 
-function isTeamInCheck(team, b) {
-    const pos = getKingPos(team, b);
-    return pos ? isSquareAttacked(pos.r, pos.c, team === 'white' ? 'black' : 'white', b) : false;
+function isTeamInCheck(team, board) {
+    const pos = getKingPos(team, board);
+    if (!pos) return false;
+    return isSquareAttacked(pos.r, pos.c, team === 'white' ? 'black' : 'white', board);
 }
 
-function isMoveLegal(fR, fC, tR, tC, team) {
-    const p = boardState[fR][fC];
-    if (!canMoveTo(fR, fC, tR, tC, p, boardState)) return false;
+function isMoveLegal(fromR, fromC, toR, toC, team) {
+    const piece = boardState[fromR][fromC];
+    if (!canMoveTo(fromR, fromC, toR, toC, piece, boardState)) return false;
+
     const nextBoard = boardState.map(row => [...row]);
-    nextBoard[tR][tC] = p;
-    nextBoard[fR][fC] = '';
-    if ((p==='♙'||p==='♟') && enPassantTarget?.r === tR && enPassantTarget?.c === tC) nextBoard[fR][tC] = '';
+    nextBoard[toR][toC] = piece;
+    nextBoard[fromR][fromC] = '';
+
+    if ((piece === '♙' || piece === '♟') && enPassantTarget && enPassantTarget.r === toR && enPassantTarget.c === toC) {
+        nextBoard[fromR][toC] = '';
+    }
+
     return !isTeamInCheck(team, nextBoard);
 }
 
 function getLegalMoves(team) {
     let moves = [];
-    for(let r=0; r<8; r++) {
-        for(let c=0; c<8; c++) {
-            if(getTeam(boardState[r][c]) === team) {
-                for(let tr=0; tr<8; tr++) {
-                    for(let tc=0; tc<8; tc++) {
-                        if(isMoveLegal(r, c, tr, tc, team)) moves.push({from: {r,c}, to: {r:tr, c:tc}});
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            if (getTeam(boardState[r][c]) === team) {
+                for (let tr = 0; tr < 8; tr++) {
+                    for (let tc = 0; tc < 8; tc++) {
+                        if (isMoveLegal(r, c, tr, tc, team)) {
+                            moves.push({ from: { r, c }, to: { r: tr, c: tc } });
+                        }
                     }
                 }
             }
@@ -269,30 +331,32 @@ function getLegalMoves(team) {
     return moves;
 }
 
-// --- 4. GAME ACTIONS ---
 function handleActualMove(from, to, isLocal) {
     if (isGameOver) return;
+
     const movingPiece = boardState[from.r][from.c];
     const targetPiece = boardState[to.r][to.c];
     const team = currentTurn;
-    const isEP = (movingPiece === '♙' || movingPiece === '♟') && enPassantTarget?.r === to.r && enPassantTarget?.c === to.c;
-    
-    let castle = null;
+    const isEP = (movingPiece === '♙' || movingPiece === '♟') && enPassantTarget && enPassantTarget.r === to.r && enPassantTarget.c === to.c;
+
+    let castleType = null;
     if ((movingPiece === '♔' || movingPiece === '♚') && Math.abs(from.c - to.c) === 2) {
-        castle = from.c < to.c ? 'short' : 'long';
-        const rO = to.c === 6 ? 7 : 0, rN = to.c === 6 ? 5 : 3;
-        boardState[to.r][rN] = boardState[to.r][rO];
-        boardState[to.r][rO] = '';
+        castleType = from.c < to.c ? 'short' : 'long';
+        const rookOldCol = to.c === 6 ? 7 : 0;
+        const rookNewCol = to.c === 6 ? 5 : 3;
+        boardState[to.r][rookNewCol] = boardState[to.r][rookOldCol];
+        boardState[to.r][rookOldCol] = '';
     }
 
-    let note = getNotation(from.r, from.c, to.r, to.c, movingPiece, targetPiece, isEP, castle);
+    let notation = getNotation(from.r, from.c, to.r, to.c, movingPiece, targetPiece, isEP, castleType);
 
     if (isEP) boardState[from.r][to.c] = '';
-    hasMoved[`${from.r},${from.c}`] = 1;
+    hasMoved[`${from.r},${from.c}`] = true;
     boardState[to.r][to.c] = movingPiece;
     boardState[from.r][from.c] = '';
-    
-    if (movingPiece === '♙' && to.r === 0) boardState[to.r][to.c] = '♕'; 
+
+    // Promotion
+    if (movingPiece === '♙' && to.r === 0) boardState[to.r][to.c] = '♕';
     if (movingPiece === '♟' && to.r === 7) boardState[to.r][to.c] = '♛';
 
     if (!isInfinite && isLocal) {
@@ -300,11 +364,11 @@ function handleActualMove(from, to, isLocal) {
         else blackTime += increment;
     }
 
-    enPassantTarget = (movingPiece === '♙' || movingPiece === '♟') && Math.abs(from.r - to.r) === 2 
+    enPassantTarget = (movingPiece === '♙' || movingPiece === '♟') && Math.abs(from.r - to.r) === 2
         ? { r: (from.r + to.r) / 2, c: to.c } : null;
 
     currentTurn = (team === 'white' ? 'black' : 'white');
-    
+
     const nextMoves = getLegalMoves(currentTurn);
     const inCheck = isTeamInCheck(currentTurn, boardState);
     let forcedStatus = null;
@@ -313,196 +377,222 @@ function handleActualMove(from, to, isLocal) {
         isGameOver = true;
         if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
         if (inCheck) {
-            note += '#';
+            notation += '#';
             forcedStatus = `CHECKMATE! ${team.toUpperCase()} WINS`;
         } else {
             forcedStatus = "DRAW BY STALEMATE";
         }
         showResultModal(forcedStatus);
     } else if (inCheck) {
-        note += '+';
+        notation += '+';
     }
 
-    if (team === 'white') moveHistory.push({ w: note, b: '' });
-    else if (moveHistory.length > 0) moveHistory[moveHistory.length - 1].b = note;
+    if (team === 'white') moveHistory.push({ w: notation, b: '' });
+    else if (moveHistory.length > 0) moveHistory[moveHistory.length - 1].b = notation;
 
     selected = null;
-    if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to }, whiteTime, blackTime });
+    if (isLocal) {
+        socket.emit("send-move", {
+            password: currentPassword,
+            move: { from, to },
+            whiteTime,
+            blackTime
+        });
+    }
     render(forcedStatus);
 }
 
-function resignGame() {
-    if (isGameOver) return;
-    const winner = myColor === 'white' ? 'black' : 'white';
-    const status = `${winner.toUpperCase()} WINS BY RESIGNATION`;
-    isGameOver = true;
-    if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
-    socket.emit("resign", { password: currentPassword, winner: winner });
-    showResultModal(status);
-    render(status);
-}
+// --- UI AND RENDER ---
 
-function offerDraw() {
-    if (isGameOver) return;
-    socket.emit("offer-draw", { password: currentPassword });
-    showStatusMessage("Draw offer sent...");
-}
-
-function showDrawOffer() {
-    const area = document.getElementById('notification-area');
-    if (!area) return;
-    area.innerHTML = `<div class="draw-modal">Opponent offers a draw<div class="modal-btns"><button class="accept-btn" onclick="respondToDraw(true)">Accept</button><button class="decline-btn" onclick="respondToDraw(false)">Decline</button></div></div>`;
-}
-
-function respondToDraw(accepted) {
-    socket.emit("draw-response", { password: currentPassword, accepted: accepted });
-    document.getElementById('notification-area').innerHTML = '';
-}
-
-function showStatusMessage(msg) {
-    const area = document.getElementById('notification-area');
-    if (!area) return;
-    area.innerHTML = `<div class="status-msg">${msg}</div>`;
-    setTimeout(() => { area.innerHTML = ''; }, 3000);
-}
-
-function showResultModal(txt) {
-    document.getElementById('game-over-overlay')?.remove();
-    const overlay = document.createElement('div');
-    overlay.id = 'game-over-overlay';
-    overlay.innerHTML = `
-        <div class="result-card">
-            <h2>Game Over</h2>
-            <p id="result-desc">${txt}</p>
-            <div class="modal-btns-vertical">
-                <button id="rematch-btn" onclick="requestRematch()">Request Rematch</button>
-                <button class="action-btn" onclick="closeModal()">View Position</button>
-                <button class="action-btn" style="background:#444" onclick="location.reload()">Exit to Lobby</button>
-            </div>
-        </div>`;
-    document.body.appendChild(overlay);
-}
-
-function requestRematch() {
-    if (rematchRequested) return;
-    rematchRequested = true;
-    const btn = document.getElementById('rematch-btn');
-    if (btn) {
-        btn.innerText = "Waiting...";
-        btn.disabled = true;
-    }
-    socket.emit("rematch-request", { password: currentPassword });
-}
-
-function closeModal() {
-    const overlay = document.getElementById('game-over-overlay');
-    if (overlay) overlay.style.display = 'none';
-    if (!document.getElementById('reopen-results-btn')) {
-        const btn = document.createElement('button');
-        btn.id = 'reopen-results-btn';
-        btn.className = 'action-btn';
-        btn.style.marginTop = '10px';
-        btn.textContent = 'View Game Result';
-        btn.onclick = () => document.getElementById('game-over-overlay').style.display = 'flex';
-        document.getElementById('side-panel').appendChild(btn);
-    }
-}
-
-// --- 5. RENDERER ---
 function render(forcedStatus) {
     const layout = document.getElementById('main-layout');
     if (!layout) return;
 
-    // Cache chat and input so they don't reset when the board re-renders
-    const oldChatHTML = document.getElementById('chat-messages')?.innerHTML || "";
-    const oldChatInput = document.getElementById('chat-input')?.value || "";
+    // CRITICAL: SAVE CHAT STATE
+    const oldInput = document.getElementById('chat-input');
+    const isChatFocused = (document.activeElement === oldInput);
+    const cursorPos = oldInput ? oldInput.selectionStart : 0;
+    const currentTypingValue = oldInput ? oldInput.value : "";
+    const existingMessagesHTML = document.getElementById('chat-messages')?.innerHTML || "";
 
-    layout.replaceChildren();
+    layout.innerHTML = '';
 
-    // COLUMN 1: CHAT
+    // 1. CHAT PANEL
     const chatPanel = document.createElement('div');
     chatPanel.id = 'chat-panel';
     chatPanel.innerHTML = `
         <div id="chat-header">GAME CHAT</div>
-        <div id="chat-messages">${oldChatHTML}</div>
+        <div id="chat-messages">${existingMessagesHTML}</div>
         <div id="chat-input-area">
-            <input type="text" id="chat-input" placeholder="Say hello..." autocomplete="off">
+            <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
             <button id="chat-send-btn">Send</button>
-        </div>`;
+        </div>
+    `;
+    
+    const newInp = chatPanel.querySelector('#chat-input');
+    newInp.value = currentTypingValue;
+    
+    // Stop event propagation so typing doesn't trigger chess hotkeys (if any)
+    newInp.addEventListener('keydown', (e) => e.stopPropagation());
+    newInp.onkeypress = (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') sendChatMessage();
+    };
     
     chatPanel.querySelector('#chat-send-btn').onclick = sendChatMessage;
-    chatPanel.querySelector('#chat-input').onkeypress = (e) => e.key === 'Enter' && sendChatMessage();
-    chatPanel.querySelector('#chat-input').value = oldChatInput;
     layout.appendChild(chatPanel);
 
-    // COLUMN 2: GAME AREA
-    const check = isTeamInCheck(currentTurn, boardState);
-    let sTxt = forcedStatus || (isGameOver ? "GAME OVER" : `${currentTurn.toUpperCase()}'S TURN ${check ? '(CHECK!)' : ''}`);
+    // 2. GAME AREA
+    const gameArea = document.createElement('div');
+    gameArea.id = 'game-area';
 
-    const gameArea = document.createElement('div'); gameArea.id = 'game-area';
-    const createBar = (name, id) => {
-        const div = document.createElement('div'); div.className = 'player-bar';
-        div.innerHTML = `<span class="player-name">${name} ${myColor === id ? '(YOU)' : ''}</span><div id="timer-${id}" class="timer"></div>`;
-        return div;
+    const createPlayerBar = (name, id) => {
+        const bar = document.createElement('div');
+        bar.className = 'player-bar';
+        bar.innerHTML = `
+            <span class="player-name">${name} ${myColor === id ? '(YOU)' : ''}</span>
+            <div id="timer-${id}" class="timer">--:--</div>
+        `;
+        return bar;
     };
 
-    if(myColor === 'black') gameArea.appendChild(createBar(whiteName, 'white'));
-    else gameArea.appendChild(createBar(blackName, 'black'));
+    if (myColor === 'black') gameArea.appendChild(createPlayerBar(whiteName, 'white'));
+    else gameArea.appendChild(createPlayerBar(blackName, 'black'));
 
-    const boardCont = document.createElement('div'); boardCont.id = 'board-container';
-    const boardEl = document.createElement('div'); boardEl.id = 'board';
-    
+    const boardCont = document.createElement('div');
+    boardCont.id = 'board-container';
+    const boardEl = document.createElement('div');
+    boardEl.id = 'board';
+
+    const check = isTeamInCheck(currentTurn, boardState);
     let hints = (selected && !isGameOver) ? getLegalMoves(currentTurn).filter(m => m.from.r === selected.r && m.from.c === selected.c).map(m => m.to) : [];
 
-    const range = (myColor === 'black') ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
-    for(let r of range) {
-        for(let c of range) {
+    const range = (myColor === 'black') ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
+
+    for (let r of range) {
+        for (let c of range) {
             const sq = document.createElement('div');
             const piece = boardState[r][c];
-            sq.className = `square ${(r+c)%2===0 ? 'white-sq' : 'black-sq'}`;
+            sq.className = `square ${(r + c) % 2 === 0 ? 'white-sq' : 'black-sq'}`;
+
             if (check && piece === (currentTurn === 'white' ? '♔' : '♚')) sq.classList.add('king-check');
-            if(selected?.r===r && selected?.c===c) sq.classList.add('selected');
-            if(hints.some(h => h.r===r && h.c===c)) {
-                const dot = document.createElement('div');
-                dot.className = piece === '' ? 'hint-dot' : 'hint-capture';
-                sq.appendChild(dot);
+            if (selected && selected.r === r && selected.c === c) sq.classList.add('selected');
+
+            if (hints.some(h => h.r === r && h.c === c)) {
+                const hint = document.createElement('div');
+                hint.className = piece === '' ? 'hint-dot' : 'hint-capture';
+                sq.appendChild(hint);
             }
-            if(piece) {
-                const sp = document.createElement('span');
-                sp.className = `piece ${isWhite(piece)?'w-piece':'b-piece'}`;
-                sp.textContent = piece;
-                sq.appendChild(sp);
+
+            if (piece !== '') {
+                const span = document.createElement('span');
+                span.className = `piece ${isWhite(piece) ? 'w-piece' : 'b-piece'}`;
+                span.textContent = piece;
+                sq.appendChild(span);
             }
+
             sq.onclick = () => {
-                if(isGameOver || currentTurn !== myColor) return;
-                if(selected) {
-                    if(selected.r === r && selected.c === c) { selected = null; render(); } 
-                    else if(hints.some(h => h.r === r && h.c === c)) handleActualMove(selected, {r,c}, true);
-                    else { selected = getTeam(piece) === currentTurn ? {r,c} : null; render(); }
-                } else if(getTeam(piece) === currentTurn) { selected = {r,c}; render(); }
+                if (isGameOver || currentTurn !== myColor) return;
+                if (selected) {
+                    if (selected.r === r && selected.c === c) {
+                        selected = null;
+                        render();
+                    } else if (hints.some(h => h.r === r && h.c === c)) {
+                        handleActualMove(selected, { r, c }, true);
+                    } else if (getTeam(piece) === currentTurn) {
+                        selected = { r, c };
+                        render();
+                    }
+                } else if (getTeam(piece) === currentTurn) {
+                    selected = { r, c };
+                    render();
+                }
             };
             boardEl.appendChild(sq);
         }
     }
-    boardCont.appendChild(boardEl); gameArea.appendChild(boardCont);
-    if(myColor === 'black') gameArea.appendChild(createBar(blackName, 'black'));
-    else gameArea.appendChild(createBar(whiteName, 'white'));
+
+    boardCont.appendChild(boardEl);
+    gameArea.appendChild(boardCont);
+
+    if (myColor === 'black') gameArea.appendChild(createPlayerBar(blackName, 'black'));
+    else gameArea.appendChild(createPlayerBar(whiteName, 'white'));
+
     layout.appendChild(gameArea);
 
-    // COLUMN 3: SIDE PANEL
-    const side = document.createElement('div'); side.id = 'side-panel';
-    side.innerHTML = `<div id="status-box"><div id="status-text">${sTxt}</div></div><div id="notification-area"></div><div class="btn-row"><button class="action-btn" onclick="offerDraw()" ${isGameOver ? 'disabled' : ''}>Offer Draw</button><button class="action-btn" onclick="resignGame()" ${isGameOver ? 'disabled' : ''}>Resign</button></div><div id="history-container"></div>`;
-    const hCont = side.querySelector('#history-container');
+    // 3. SIDE PANEL
+    const sidePanel = document.createElement('div');
+    sidePanel.id = 'side-panel';
+    let statusDisplay = forcedStatus || (isGameOver ? "GAME OVER" : `${currentTurn.toUpperCase()}'S TURN ${check ? '(CHECK!)' : ''}`);
+
+    sidePanel.innerHTML = `
+        <div id="status-box"><div id="status-text">${statusDisplay}</div></div>
+        <div id="notification-area"></div>
+        <div class="btn-row">
+            <button class="action-btn" onclick="offerDraw()" ${isGameOver ? 'disabled' : ''}>Offer Draw</button>
+            <button class="action-btn" onclick="resignGame()" ${isGameOver ? 'disabled' : ''}>Resign</button>
+        </div>
+        <div id="history-container"></div>
+    `;
+
+    const hist = sidePanel.querySelector('#history-container');
     moveHistory.forEach((m, i) => {
-        hCont.innerHTML += `<div class="history-row"><div class="move-num">${i+1}.</div><div class="move-val">${m.w}</div><div class="move-val">${m.b}</div></div>`;
+        const row = document.createElement('div');
+        row.className = 'history-row';
+        row.innerHTML = `<div class="move-num">${i + 1}.</div><div>${m.w}</div><div>${m.b}</div>`;
+        hist.appendChild(row);
     });
-    layout.appendChild(side);
+    layout.appendChild(sidePanel);
+
+    // RESTORE FOCUS AND CURSOR
+    if (isChatFocused) {
+        newInp.focus();
+        newInp.setSelectionRange(cursorPos, cursorPos);
+    }
+
     updateTimerDisplay();
 }
 
+function updateTimerDisplay() {
+    const wT = document.getElementById('timer-white');
+    const bT = document.getElementById('timer-black');
+    if (wT) {
+        wT.textContent = formatTime(whiteTime);
+        wT.className = `timer ${currentTurn === 'white' && !isGameOver ? 'active' : ''}`;
+    }
+    if (bT) {
+        bT.textContent = formatTime(blackTime);
+        bT.className = `timer ${currentTurn === 'black' && !isGameOver ? 'active' : ''}`;
+    }
+}
+
+function formatTime(seconds) {
+    if (isInfinite) return "∞";
+    const s = Math.max(0, seconds);
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+// --- GAME STATE INIT ---
+
 function initGameState() {
-    boardState = [['♜','♞','♝','♛','♚','♝','♞','♜'],['♟','♟','♟','♟','♟','♟','♟','♟'],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['','','','','','','',''],['♙','♙','♙','♙','♙','♙','♙','♙'],['♖','♘','♗','♕','♔','♗','♘','♖']];
-    currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false; selected = null; rematchRequested = false;
+    boardState = [
+        ['♜', '♞', '♝', '♛', '♚', '♝', '♞', '♜'],
+        ['♟', '♟', '♟', '♟', '♟', '♟', '♟', '♟'],
+        ['', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', ''],
+        ['♙', '♙', '♙', '♙', '♙', '♙', '♙', '♙'],
+        ['♖', '♘', '♗', '♕', '♔', '♗', '♘', '♖']
+    ];
+    currentTurn = 'white';
+    hasMoved = {};
+    moveHistory = [];
+    isGameOver = false;
+    selected = null;
+    rematchRequested = false;
 
     if (gameSettings) {
         whiteTime = (parseInt(gameSettings.mins) * 60) + parseInt(gameSettings.secs);
@@ -515,24 +605,171 @@ function initGameState() {
     if (!isInfinite) {
         window.chessIntervalInstance = setInterval(() => {
             if (isGameOver) return;
-            if (currentTurn === 'white') whiteTime--; else blackTime--;
+            if (currentTurn === 'white') whiteTime--;
+            else blackTime--;
             updateTimerDisplay();
-            if (whiteTime <= 0 || blackTime <= 0) { 
-                isGameOver = true; clearInterval(window.chessIntervalInstance);
-                const winMsg = whiteTime <= 0 ? "BLACK WINS ON TIME" : "WHITE WINS ON TIME";
-                showResultModal(winMsg);
-                render(winMsg); 
+            if (whiteTime <= 0 || blackTime <= 0) {
+                isGameOver = true;
+                clearInterval(window.chessIntervalInstance);
+                const msg = whiteTime <= 0 ? "BLACK WINS ON TIME" : "WHITE WINS ON TIME";
+                showResultModal(msg);
+                render(msg);
             }
         }, 1000);
     }
     render();
 }
 
-function updateTimerDisplay() {
-    const wT = document.getElementById('timer-white'), bT = document.getElementById('timer-black');
-    if (wT) { wT.textContent = formatTime(whiteTime); wT.className = `timer ${currentTurn === 'white' && !isGameOver ? 'active' : ''}`; }
-    if (bT) { bT.textContent = formatTime(blackTime); bT.className = `timer ${currentTurn === 'black' && !isGameOver ? 'active' : ''}`; }
+// --- OVERLAYS AND MODALS ---
+
+function showSetup() {
+    const overlay = document.createElement('div');
+    overlay.id = 'setup-overlay';
+    overlay.innerHTML = `
+        <div class="setup-card">
+            <div class="tabs">
+                <button id="tab-create" class="active" onclick="switchTab('create')">Create Room</button>
+                <button id="tab-join" onclick="switchTab('join')">Join Room</button>
+            </div>
+            <div id="create-sect">
+                <div class="input-group"><label>Room Password</label><input id="roomPass" placeholder="Secret Code"></div>
+                <div class="input-group"><label>Your Name</label><input id="uName" value="Player 1"></div>
+                <div class="input-group"><label>Time Control</label>
+                    <div style="display:flex; gap:5px;">
+                        <input type="number" id="tMin" value="10" title="Minutes">
+                        <input type="number" id="tSec" value="0" title="Seconds">
+                        <input type="number" id="tInc" value="0" title="Increment">
+                    </div>
+                </div>
+                <div class="input-group"><label>Play As</label>
+                    <select id="colorPref">
+                        <option value="random">Random</option>
+                        <option value="white">White</option>
+                        <option value="black">Black</option>
+                    </select>
+                </div>
+                <button class="start-btn" onclick="createRoom()">CREATE</button>
+            </div>
+            <div id="join-sect" style="display:none;">
+                <div class="input-group"><label>Room Password</label><input id="joinPass" placeholder="Enter Password"></div>
+                <div class="input-group"><label>Your Name</label><input id="joinName" value="Player 2"></div>
+                <button class="start-btn" onclick="joinRoom()">FIND ROOM</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
 }
-function formatTime(s) { if(isInfinite) return "∞"; const dS=Math.max(0,s); return `${Math.floor(dS/60)}:${(dS%60).toString().padStart(2,'0')}`; }
+
+function switchTab(tab) {
+    document.getElementById('create-sect').style.display = tab === 'create' ? 'block' : 'none';
+    document.getElementById('join-sect').style.display = tab === 'join' ? 'block' : 'none';
+    document.getElementById('tab-create').className = tab === 'create' ? 'active' : '';
+    document.getElementById('tab-join').className = tab === 'join' ? 'active' : '';
+}
+
+function createRoom() {
+    currentPassword = document.getElementById('roomPass').value;
+    tempName = document.getElementById('uName').value;
+    if (!currentPassword) return alert("Enter a room password.");
+    socket.emit("create-room", {
+        password: currentPassword,
+        name: tempName,
+        mins: document.getElementById('tMin').value,
+        secs: document.getElementById('tSec').value,
+        inc: document.getElementById('tInc').value,
+        colorPref: document.getElementById('colorPref').value
+    });
+}
+
+function joinRoom() {
+    currentPassword = document.getElementById('joinPass').value;
+    tempName = document.getElementById('joinName').value;
+    if (!currentPassword) return alert("Enter password.");
+    socket.emit("join-attempt", { password: currentPassword });
+}
+
+function confirmJoin() {
+    socket.emit("confirm-join", { password: currentPassword, name: tempName });
+}
+
+function resignGame() {
+    if (isGameOver) return;
+    const winner = myColor === 'white' ? 'black' : 'white';
+    socket.emit("resign", { password: currentPassword, winner: winner });
+    const status = `${winner.toUpperCase()} WINS BY RESIGNATION`;
+    isGameOver = true;
+    if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
+    showResultModal(status);
+    render(status);
+}
+
+function offerDraw() {
+    if (isGameOver) return;
+    socket.emit("offer-draw", { password: currentPassword });
+    showStatusMessage("Draw offer sent...");
+}
+
+function showDrawOffer() {
+    const area = document.getElementById('notification-area');
+    area.innerHTML = `
+        <div class="draw-modal">
+            Opponent offers a draw
+            <div class="modal-btns">
+                <button class="accept-btn" onclick="respondToDraw(true)">Accept</button>
+                <button class="decline-btn" onclick="respondToDraw(false)">Decline</button>
+            </div>
+        </div>
+    `;
+}
+
+function respondToDraw(accepted) {
+    socket.emit("draw-response", { password: currentPassword, accepted: accepted });
+    document.getElementById('notification-area').innerHTML = '';
+}
+
+function showStatusMessage(msg) {
+    const area = document.getElementById('notification-area');
+    area.innerHTML = `<div style="background:#4b4845; padding:10px; border-radius:4px; font-size:12px; text-align:center;">${msg}</div>`;
+    setTimeout(() => { area.innerHTML = ''; }, 3000);
+}
+
+function showResultModal(text) {
+    const overlay = document.createElement('div');
+    overlay.id = 'game-over-overlay';
+    overlay.innerHTML = `
+        <div class="result-card">
+            <h2>Game Over</h2>
+            <p>${text}</p>
+            <div class="modal-btns-vertical">
+                <button id="rematch-btn" onclick="requestRematch()">Request Rematch</button>
+                <button class="action-btn" onclick="closeModal()">View Board</button>
+                <button class="action-btn" style="background:#444" onclick="location.reload()">New Game</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+}
+
+function requestRematch() {
+    if (rematchRequested) return;
+    rematchRequested = true;
+    const btn = document.getElementById('rematch-btn');
+    btn.innerText = "Waiting...";
+    btn.disabled = true;
+    socket.emit("rematch-request", { password: currentPassword });
+}
+
+function closeModal() {
+    document.getElementById('game-over-overlay').style.display = 'none';
+    if (!document.getElementById('reopen-results-btn')) {
+        const btn = document.createElement('button');
+        btn.id = 'reopen-results-btn';
+        btn.className = 'action-btn';
+        btn.style.marginTop = '10px';
+        btn.textContent = 'Show Result';
+        btn.onclick = () => { document.getElementById('game-over-overlay').style.display = 'flex'; };
+        document.getElementById('side-panel').appendChild(btn);
+    }
+}
 
 window.onload = showSetup;

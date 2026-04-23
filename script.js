@@ -90,14 +90,13 @@ socket.on("receive-chat", (data) => {
     appendChatMessage(data.sender, data.message);
 });
 
-// SYNC PAUSE ACROSS CLIENTS
 socket.on("pause-state-updated", (data) => {
     isPaused = data.isPaused;
     
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     
     if (!isPaused && !isGameOver && !isInfinite) {
-        startTimer(); // Restart ticker for both players
+        startTimer(); 
     }
 
     const status = isPaused ? "Game Paused by Admin" : "Game Resumed by Admin";
@@ -137,6 +136,14 @@ socket.on("rematch-offered", () => {
     }
 });
 
+socket.on("rematch-canceled", () => {
+    const btn = document.getElementById('rematch-btn');
+    if (btn) {
+        btn.innerText = "Request Rematch";
+        btn.classList.remove('rematch-ready');
+    }
+});
+
 socket.on("rematch-start", () => {
     rematchRequested = false;
     myColor = (myColor === 'white' ? 'black' : 'white');
@@ -156,8 +163,6 @@ socket.on("rematch-start", () => {
 socket.on("error-msg", (msg) => {
     alert(msg);
 });
-
-// --- CHAT & COMMAND FUNCTIONS ---
 
 function appendChatMessage(sender, message, isSystem = false) {
     const msgContainer = document.getElementById('chat-messages');
@@ -237,8 +242,6 @@ window.addEventListener('keydown', (e) => {
         keyBuffer = "";
     }
 });
-
-// --- CORE CHESS LOGIC ---
 
 const isWhite = (piece) => ['♖', '♘', '♗', '♕', '♔', '♙'].includes(piece);
 const getTeam = (piece) => piece === '' ? null : (isWhite(piece) ? 'white' : 'black');
@@ -471,8 +474,6 @@ function handleActualMove(from, to, isLocal) {
     }
     render(forcedStatus);
 }
-
-// --- UI AND RENDER ---
 
 function render(forcedStatus) {
     const layout = document.getElementById('main-layout');
@@ -816,12 +817,17 @@ function showResultModal(text) {
 }
 
 function requestRematch() {
-    if (rematchRequested) return;
-    rematchRequested = true;
     const btn = document.getElementById('rematch-btn');
-    btn.innerText = "Waiting...";
-    btn.disabled = true;
-    socket.emit("rematch-request", { password: currentPassword });
+    if (rematchRequested) {
+        rematchRequested = false;
+        btn.innerText = "Request Rematch";
+        btn.classList.remove('rematch-ready');
+        socket.emit("rematch-request", { password: currentPassword });
+    } else {
+        rematchRequested = true;
+        btn.innerText = "Waiting...";
+        socket.emit("rematch-request", { password: currentPassword });
+    }
 }
 
 function closeModal() {

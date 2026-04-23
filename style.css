@@ -127,15 +127,6 @@ body {
 .history-row { display: grid; grid-template-columns: 35px 1fr 1fr; font-family: monospace; font-size: 14px; padding: 6px 0; border-bottom: 1px solid #262421; }
 .move-num { color: #666; }
 
-.hint-dot { width: 16px; height: 16px; background: rgba(0,0,0,0.15); border-radius: 50%; }
-.hint-capture { width: 54px; height: 54px; border: 5px solid rgba(0,0,0,0.15); border-radius: 50%; position: absolute; }
-
-.draw-modal { background: #4b4845; border-left: 4px solid #779556; padding: 12px; border-radius: 4px; font-size: 13px; margin-bottom: 10px; }
-.modal-btns { display: flex; gap: 8px; margin-top: 10px; }
-.modal-btns button { flex: 1; padding: 8px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 11px; }
-.accept-btn { background: #779556; color: #fff; }
-.decline-btn { background: #312e2b; color: #bababa; }
-
 #game-over-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); display: flex; justify-content: center; align-items: center; z-index: 2000; }
 .result-card { background: #262421; padding: 30px; border-radius: 12px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 2px solid #779556; width: 320px; }
 .result-card h2 { color: #779556; margin-top: 0; text-transform: uppercase; }

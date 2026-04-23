@@ -88,7 +88,6 @@ io.on("connection", (socket) => {
         });
     });
 
-    // CRITICAL FIX: Use io.in().emit to reach EVERYONE in the room
     socket.on("admin-pause-toggle", (data) => {
         io.in(data.password).emit("pause-state-updated", { isPaused: data.isPaused });
     });
@@ -108,12 +107,18 @@ io.on("connection", (socket) => {
     socket.on("rematch-request", (data) => {
         const pass = data.password;
         if (!roomRematchStates[pass]) roomRematchStates[pass] = new Set();
-        roomRematchStates[pass].add(socket.id);
-        socket.to(pass).emit("rematch-offered");
+        
+        if (roomRematchStates[pass].has(socket.id)) {
+            roomRematchStates[pass].delete(socket.id);
+            socket.to(pass).emit("rematch-canceled");
+        } else {
+            roomRematchStates[pass].add(socket.id);
+            socket.to(pass).emit("rematch-offered");
 
-        if (roomRematchStates[pass].size === 2) {
-            delete roomRematchStates[pass];
-            io.in(pass).emit("rematch-start");
+            if (roomRematchStates[pass].size === 2) {
+                delete roomRematchStates[pass];
+                io.in(pass).emit("rematch-start");
+            }
         }
     });
 

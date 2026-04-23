@@ -99,7 +99,6 @@ socket.on("pause-state-updated", (data) => {
     render(); 
 });
 
-// NEW: Listener for time changes
 socket.on("time-updated", (data) => {
     if (data.color === 'white') whiteTime = data.newTime;
     else blackTime = data.newTime;
@@ -115,9 +114,7 @@ socket.on("opponent-resigned", (data) => {
     render(status);
 });
 
-socket.on("draw-offered", () => {
-    showDrawOffer();
-});
+socket.on("draw-offered", () => { showDrawOffer(); });
 
 socket.on("draw-resolved", (data) => {
     if (data.accepted) {
@@ -177,27 +174,50 @@ function sendChatMessage() {
     const input = document.getElementById('chat-input');
     const msg = input.value.trim();
     if (!msg || !currentPassword) return;
+
     if (msg.startsWith("/") && isAdmin) {
         handleAdminCommand(msg);
         input.value = '';
         return;
     }
+
     const myName = (myColor === 'white' ? whiteName : blackName);
     socket.emit("send-chat", { password: currentPassword, message: msg, senderName: myName });
     appendChatMessage("You", msg);
     input.value = '';
 }
 
+// Helper for showing help info
+const COMMANDS_HELP = {
+    "pause": { desc: "Pauses or resumes the game clocks.", usage: "/pause <true/false>" },
+    "time": { desc: "Sets the remaining time for a specific player.", usage: "/time <white/black> <minutes> <seconds>" },
+    "help": { desc: "Lists all commands or shows usage for one.", usage: "/help <command name (optional)>" }
+};
+
 function handleAdminCommand(cmd) {
     const args = cmd.split(' ');
-    const baseCmd = args[0].toLowerCase();
+    const baseCmd = args[0].toLowerCase().substring(1);
 
-    if (baseCmd === "/pause") {
-        const val = args[1]?.toLowerCase();
-        let newState = (val === "true");
-        socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: newState });
+    if (baseCmd === "help") {
+        const sub = args[1]?.toLowerCase();
+        if (sub && COMMANDS_HELP[sub]) {
+            appendChatMessage("Console", `Usage: ${COMMANDS_HELP[sub].usage}`, true);
+        } else {
+            appendChatMessage("Console", "Available Commands:", true);
+            for (const key in COMMANDS_HELP) {
+                appendChatMessage("Console", `/${key} - ${COMMANDS_HELP[key].desc}`, true);
+            }
+        }
     } 
-    else if (baseCmd === "/time") {
+    else if (baseCmd === "pause") {
+        const val = args[1]?.toLowerCase();
+        if (val === "true" || val === "false") {
+            socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: val === "true" });
+        } else {
+            appendChatMessage("Console", `Command missing arguments. Usage: ${COMMANDS_HELP.pause.usage}`, true);
+        }
+    } 
+    else if (baseCmd === "time") {
         const targetColor = args[1]?.toLowerCase();
         const mins = parseInt(args[2]);
         const secs = parseInt(args[3]);
@@ -208,10 +228,10 @@ function handleAdminCommand(cmd) {
                 newTime: (mins * 60) + secs
             });
         } else {
-            appendChatMessage("Console", "Usage: /time <white|black> <mins> <secs>", true);
+            appendChatMessage("Console", `Command missing arguments. Usage: ${COMMANDS_HELP.time.usage}`, true);
         }
     } else {
-        appendChatMessage("Console", `Unknown command: ${baseCmd}`, true);
+        appendChatMessage("Console", `Unknown command. Type /help to see all.`, true);
     }
 }
 
@@ -531,19 +551,19 @@ function initGameState() {
 function showSetup() {
     const overlay = document.createElement('div'); overlay.id = 'setup-overlay';
     overlay.innerHTML = `
-        <div class="setup-card">
-            <div class="tabs"><button id="tab-create" class="active" onclick="switchTab('create')">Create</button><button id="tab-join" onclick="switchTab('join')">Join</button></div>
-            <div id="create-sect">
-                <div class="input-group"><label>Room Password</label><input id="roomPass" placeholder="Secret Code"></div>
-                <div class="input-group"><label>Your Name</label><input id="uName" value="Player 1"></div>
-                <div class="input-group"><label>Time Control</label><div style="display:flex; gap:5px;"><input type="number" id="tMin" value="10"><input type="number" id="tSec" value="0"><input type="number" id="tInc" value="0"></div></div>
-                <div class="input-group"><label>Play As</label><select id="colorPref"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
-                <button class="start-btn" onclick="createRoom()">CREATE</button>
+        <div class=\"setup-card\">
+            <div class=\"tabs\"><button id=\"tab-create\" class=\"active\" onclick=\"switchTab('create')\">Create</button><button id=\"tab-join\" onclick=\"switchTab('join')\">Join</button></div>
+            <div id=\"create-sect\">
+                <div class=\"input-group\"><label>Room Password</label><input id=\"roomPass\" placeholder=\"Secret Code\"></div>
+                <div class=\"input-group\"><label>Your Name</label><input id=\"uName\" value=\"Player 1\"></div>
+                <div class=\"input-group\"><label>Time Control</label><div style=\"display:flex; gap:5px;\"><input type=\"number\" id=\"tMin\" value=\"10\"><input type=\"number\" id=\"tSec\" value=\"0\"><input type=\"number\" id=\"tInc\" value=\"0\"></div></div>
+                <div class=\"input-group\"><label>Play As</label><select id=\"colorPref\"><option value=\"random\">Random</option><option value=\"white\">White</option><option value=\"black\">Black</option></select></div>
+                <button class=\"start-btn\" onclick=\"createRoom()\">CREATE</button>
             </div>
-            <div id="join-sect" style="display:none;">
-                <div class="input-group"><label>Room Password</label><input id="joinPass" placeholder="Enter Password"></div>
-                <div class="input-group"><label>Your Name</label><input id="joinName" value="Player 2"></div>
-                <button class="start-btn" onclick="joinRoom()">FIND ROOM</button>
+            <div id=\"join-sect\" style=\"display:none;\">
+                <div class=\"input-group\"><label>Room Password</label><input id=\"joinPass\" placeholder=\"Enter Password\"></div>
+                <div class=\"input-group\"><label>Your Name</label><input id=\"joinName\" value=\"Player 2\"></div>
+                <button class=\"start-btn\" onclick=\"joinRoom()\">FIND ROOM</button>
             </div>
         </div>
     `;
@@ -583,26 +603,26 @@ function offerDraw() { if (!isGameOver) { socket.emit("offer-draw", { password: 
 
 function showDrawOffer() {
     const area = document.getElementById('notification-area');
-    area.innerHTML = `<div class="draw-modal">Opponent offers draw<div class="modal-btns"><button class="accept-btn" onclick="respondToDraw(true)">Accept</button><button class="decline-btn" onclick="respondToDraw(false)">Decline</button></div></div>`;
+    area.innerHTML = `<div class=\"draw-modal\">Opponent offers draw<div class=\"modal-btns\"><button class=\"accept-btn\" onclick=\"respondToDraw(true)\">Accept</button><button class=\"decline-btn\" onclick=\"respondToDraw(false)\">Decline</button></div></div>`;
 }
 
 function respondToDraw(accepted) { socket.emit("draw-response", { password: currentPassword, accepted: accepted }); document.getElementById('notification-area').innerHTML = ''; }
 
 function showStatusMessage(msg) {
     const area = document.getElementById('notification-area');
-    area.innerHTML = `<div style="background:#4b4845; padding:10px; border-radius:4px; font-size:12px; text-align:center;">${msg}</div>`;
+    area.innerHTML = `<div style=\"background:#4b4845; padding:10px; border-radius:4px; font-size:12px; text-align:center;\">${msg}</div>`;
     setTimeout(() => { area.innerHTML = ''; }, 3000);
 }
 
 function showResultModal(text) {
     const overlay = document.createElement('div'); overlay.id = 'game-over-overlay';
     overlay.innerHTML = `
-        <div class="result-card">
+        <div class=\"result-card\">
             <h2>Game Over</h2><p>${text}</p>
-            <div class="modal-btns-vertical">
-                <button id="rematch-btn" onclick="requestRematch()">Request Rematch</button>
-                <button class="action-btn" onclick="closeModal()">View Board</button>
-                <button class="action-btn" style="background:#444" onclick="location.reload()">New Game</button>
+            <div class=\"modal-btns-vertical\">
+                <button id=\"rematch-btn\" onclick=\"requestRematch()\">Request Rematch</button>
+                <button class=\"action-btn\" onclick=\"closeModal()\">View Board</button>
+                <button class=\"action-btn\" style=\"background:#444\" onclick=\"location.reload()\">New Game</button>
             </div>
         </div>
     `;

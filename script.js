@@ -127,59 +127,65 @@ function appendChatMessage(sender, message, isSystem = false) {
     msgContainer.scrollTop = msgContainer.scrollHeight;
 }
 
+// --- NEW APPROACH: PRE-PARSING INTERCEPTOR ---
 function sendChatMessage() {
     const input = document.getElementById('chat-input');
     const msg = input.value.trim();
     if (!msg || !currentPassword) return;
+
     if (msg.startsWith("/") && isAdmin) {
+        const lowerMsg = msg.toLowerCase();
+        
+        // 1. HELP INTERCEPTOR (Direct string matching)
+        const helpMap = {
+            "/help pause": "Usage: /pause <true/false>",
+            "/help time": "Usage: /time <colour> <minutes> <seconds>",
+            "/help help": "Usage: /help <command>"
+        };
+
+        if (helpMap[lowerMsg]) {
+            appendChatMessage("Console", helpMap[lowerMsg], true);
+            input.value = '';
+            return;
+        }
+
+        if (lowerMsg === "/help") {
+            appendChatMessage("Console", "--- Available Commands ---", true);
+            appendChatMessage("Console", "/help - Lists all commands", true);
+            appendChatMessage("Console", "/pause - Pauses or Resumes the game clocks", true);
+            appendChatMessage("Console", "/time - Manually sets a player's remaining time", true);
+            input.value = '';
+            return;
+        }
+
+        // 2. PASS TO FUNCTIONAL LOGIC (If not a specific help command)
         handleAdminCommand(msg);
         input.value = '';
         return;
     }
+
     const myName = (myColor === 'white' ? whiteName : blackName);
     socket.emit("send-chat", { password: currentPassword, message: msg, senderName: myName });
     appendChatMessage("You", msg);
     input.value = '';
 }
 
-// --- NEW APPROACH: DATA-DRIVEN COMMAND HANDLING ---
-const HELP_DOCS = {
-    "pause": "Usage: /pause <true/false>",
-    "time": "Usage: /time <colour> <minutes> <seconds>",
-    "help": "Usage: /help <command>"
-};
-
 function handleAdminCommand(cmd) {
-    const parts = cmd.toLowerCase().trim().split(/\s+/);
-    const trigger = parts[0].substring(1); // "help", "pause", "time"
-    const arg1 = parts[1]; // Sub-command or first param
+    const parts = cmd.split(/\s+/);
+    const base = parts[0].toLowerCase().substring(1);
 
-    // 1. Logic for /help
-    if (trigger === "help") {
-        if (arg1 && HELP_DOCS[arg1]) {
-            appendChatMessage("Console", HELP_DOCS[arg1], true);
+    if (base === "pause") {
+        const val = parts[1]?.toLowerCase();
+        if (val === "true" || val === "false") {
+            socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: (val === "true") });
         } else {
-            appendChatMessage("Console", "--- Available Commands ---", true);
-            appendChatMessage("Console", "/help - Lists all commands", true);
-            appendChatMessage("Console", "/pause - Pauses or Resumes the game clocks", true);
-            appendChatMessage("Console", "/time - Manually sets a player's remaining time", true);
+            appendChatMessage("Console", "Usage: /pause <true/false>", true);
         }
         return;
     }
 
-    // 2. Logic for /pause
-    if (trigger === "pause") {
-        if (arg1 === "true" || arg1 === "false") {
-            socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: (arg1 === "true") });
-        } else {
-            appendChatMessage("Console", HELP_DOCS["pause"], true);
-        }
-        return;
-    }
-
-    // 3. Logic for /time
-    if (trigger === "time") {
-        const color = parts[1];
+    if (base === "time") {
+        const color = parts[1]?.toLowerCase();
         const mins = parseInt(parts[2]);
         const secs = parseInt(parts[3]);
 
@@ -190,12 +196,12 @@ function handleAdminCommand(cmd) {
                 newTime: (mins * 60) + secs
             });
         } else {
-            appendChatMessage("Console", HELP_DOCS["time"], true);
+            appendChatMessage("Console", "Usage: /time <colour> <minutes> <seconds>", true);
         }
         return;
     }
 
-    appendChatMessage("Console", `Unknown command: /${trigger}`, true);
+    appendChatMessage("Console", `Unknown command: /${base}`, true);
 }
 
 window.addEventListener('keydown', (e) => {

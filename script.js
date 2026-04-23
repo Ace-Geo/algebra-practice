@@ -106,7 +106,6 @@ socket.on("time-updated", (data) => {
     appendChatMessage("Console", `${data.color.toUpperCase()} time set to ${formatTime(data.newTime)} by Admin`, true);
 });
 
-// NEW SOCKET LISTENER FOR PIECE PLACEMENT
 socket.on("piece-placed", (data) => {
     const { r, c, piece } = data;
     boardState[r][c] = piece;
@@ -272,8 +271,6 @@ function handleAdminCommand(cmd) {
             return;
         }
 
-        // Logic: Directly emit a new custom event for piece placement
-        // NOTE: Make sure to add logic in server.js to handle "admin-place-piece"
         socket.emit("admin-place-piece", {
             password: currentPassword,
             r: row,
@@ -520,11 +517,35 @@ function render(forcedStatus) {
             }
             sq.onclick = () => {
                 if (isGameOver || currentTurn !== myColor) return;
+                
+                // --- NEW CLICK LOGIC ---
                 if (selected) {
-                    if (selected.r === r && selected.c === c) { selected = null; render(); }
-                    else if (hints.some(h => h.r === r && h.c === c)) handleActualMove(selected, { r, c }, true);
-                    else if (getTeam(boardState[r][c]) === currentTurn) { selected = { r, c }; render(); }
-                } else if (getTeam(boardState[r][c]) === currentTurn) { selected = { r, c }; render(); }
+                    // 1. If clicking a hint (legal move), execute the move
+                    if (hints.some(h => h.r === r && h.c === c)) {
+                        handleActualMove(selected, { r, c }, true);
+                    } 
+                    // 2. If clicking another piece of the same color, switch selection
+                    else if (getTeam(boardState[r][c]) === currentTurn) {
+                        // If clicking the SAME piece already selected, deselect it
+                        if (selected.r === r && selected.c === c) {
+                            selected = null;
+                        } else {
+                            selected = { r, c };
+                        }
+                        render();
+                    } 
+                    // 3. If clicking an illegal square or opponent piece, deselect
+                    else {
+                        selected = null;
+                        render();
+                    }
+                } else {
+                    // No piece selected: select only if it's your turn and your piece
+                    if (getTeam(boardState[r][c]) === currentTurn) {
+                        selected = { r, c };
+                        render();
+                    }
+                }
             };
             boardEl.appendChild(sq);
         }

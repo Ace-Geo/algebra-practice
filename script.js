@@ -31,7 +31,6 @@ let keyBuffer = "";
 socket.on("player-assignment", (data) => {
     myColor = data.color;
     gameSettings = data.settings;
-    
     if (myColor === 'white') {
         whiteName = tempName || "White";
         blackName = data.oppName;
@@ -39,10 +38,8 @@ socket.on("player-assignment", (data) => {
         blackName = tempName || "Black";
         whiteName = data.oppName;
     }
-    
     const overlay = document.getElementById('setup-overlay');
     if (overlay) overlay.remove();
-    
     initGameState();
     appendChatMessage("System", `Game started! You are playing as ${myColor.toUpperCase()}.`, true);
 });
@@ -66,7 +63,6 @@ socket.on("preview-settings", (data) => {
     let displayColor = "RANDOM";
     if (data.creatorColorPref === 'white') displayColor = "BLACK";
     if (data.creatorColorPref === 'black') displayColor = "WHITE";
-
     card.innerHTML = `
         <h2 style="color: #779556">Join Room?</h2>
         <div style="text-align: left; margin-bottom: 20px; background: #1a1a1a; padding: 15px; border-radius: 8px;">
@@ -480,9 +476,11 @@ function render(forcedStatus) {
         </div>
     `;
     
-    // --- KEEP CHAT SCROLLED TO BOTTOM ---
-    const msgContainer = chatPanel.querySelector('#chat-messages');
-    msgContainer.scrollTop = msgContainer.scrollHeight;
+    // --- FORCE CHAT TO BOTTOM AFTER RENDER ---
+    setTimeout(() => {
+        const msgContainer = document.getElementById('chat-messages');
+        if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
+    }, 0);
 
     const newInp = chatPanel.querySelector('#chat-input');
     newInp.value = currentTypingValue;

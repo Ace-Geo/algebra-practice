@@ -36,7 +36,6 @@ io.on("connection", (socket) => {
             socket.emit("error-msg", "Room is already in progress.");
             return;
         }
-
         socket.emit("preview-settings", {
             creatorName: room.creatorName,
             settings: room.settings,
@@ -56,17 +55,11 @@ io.on("connection", (socket) => {
 
         let whiteId, blackId;
         const pref = room.settings.colorPref;
-
-        if (pref === 'white') {
-            whiteId = creatorId; blackId = joinerId;
-        } else if (pref === 'black') {
-            whiteId = joinerId; blackId = creatorId;
-        } else {
-            if (Math.random() < 0.5) {
-                whiteId = creatorId; blackId = joinerId;
-            } else {
-                whiteId = joinerId; blackId = creatorId;
-            }
+        if (pref === 'white') { whiteId = creatorId; blackId = joinerId; }
+        else if (pref === 'black') { whiteId = joinerId; blackId = creatorId; }
+        else {
+            if (Math.random() < 0.5) { whiteId = creatorId; blackId = joinerId; }
+            else { whiteId = joinerId; blackId = creatorId; }
         }
 
         room.players.white = whiteId;
@@ -88,6 +81,13 @@ io.on("connection", (socket) => {
         socket.to(data.password).emit("receive-move", data);
     });
 
+    socket.on("send-chat", (data) => {
+        socket.to(data.password).emit("receive-chat", {
+            message: data.message,
+            sender: data.senderName
+        });
+    });
+
     socket.on("resign", (data) => {
         socket.to(data.password).emit("opponent-resigned", { winner: data.winner });
     });
@@ -96,7 +96,6 @@ io.on("connection", (socket) => {
         socket.to(data.password).emit("draw-offered");
     });
 
-    // Broadcast the result to the entire room (including the sender)
     socket.on("draw-response", (data) => {
         io.in(data.password).emit("draw-resolved", { accepted: data.accepted });
     });
@@ -104,7 +103,6 @@ io.on("connection", (socket) => {
     socket.on("rematch-request", (data) => {
         const pass = data.password;
         if (!roomRematchStates[pass]) roomRematchStates[pass] = new Set();
-        
         roomRematchStates[pass].add(socket.id);
         socket.to(pass).emit("rematch-offered");
 

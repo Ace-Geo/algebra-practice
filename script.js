@@ -142,53 +142,46 @@ function sendChatMessage() {
     input.value = '';
 }
 
-// --- FIXED ADMIN COMMANDS ---
+// --- NEW APPROACH: DATA-DRIVEN COMMAND HANDLING ---
+const HELP_DOCS = {
+    "pause": "Usage: /pause <true/false>",
+    "time": "Usage: /time <colour> <minutes> <seconds>",
+    "help": "Usage: /help <command>"
+};
+
 function handleAdminCommand(cmd) {
-    const fullCmd = cmd.toLowerCase().trim();
-    const args = fullCmd.split(' ');
-    const baseCmd = args[0].substring(1);
+    const parts = cmd.toLowerCase().trim().split(/\s+/);
+    const trigger = parts[0].substring(1); // "help", "pause", "time"
+    const arg1 = parts[1]; // Sub-command or first param
 
-    // 1. /HELP Logic with EXACT Strings
-    if (baseCmd === "help") {
-        if (fullCmd === "/help pause") {
-            appendChatMessage("Console", "Usage: /pause <true/false>", true);
-            return;
-        }
-        if (fullCmd === "/help time") {
-            appendChatMessage("Console", "Usage: /time <colour> <minutes> <seconds>", true);
-            return;
-        }
-        if (fullCmd === "/help help") {
-            appendChatMessage("Console", "Usage: /help <command>", true);
-            return;
-        }
-        
-        // General /help list
-        appendChatMessage("Console", "--- Available Commands ---", true);
-        appendChatMessage("Console", "/help - Lists all commands", true);
-        appendChatMessage("Console", "/pause - Pauses or Resumes the game clocks", true);
-        appendChatMessage("Console", "/time - Manually sets a player's remaining time", true);
-        return;
-    }
-
-    // 2. /PAUSE Logic
-    if (baseCmd === "pause") {
-        const val = args[1];
-        if (val === "true") {
-            socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: true });
-        } else if (val === "false") {
-            socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: false });
+    // 1. Logic for /help
+    if (trigger === "help") {
+        if (arg1 && HELP_DOCS[arg1]) {
+            appendChatMessage("Console", HELP_DOCS[arg1], true);
         } else {
-            appendChatMessage("Console", "Usage: /pause <true/false>", true);
+            appendChatMessage("Console", "--- Available Commands ---", true);
+            appendChatMessage("Console", "/help - Lists all commands", true);
+            appendChatMessage("Console", "/pause - Pauses or Resumes the game clocks", true);
+            appendChatMessage("Console", "/time - Manually sets a player's remaining time", true);
         }
         return;
     }
 
-    // 3. /TIME Logic
-    if (baseCmd === "time") {
-        const color = args[1];
-        const mins = parseInt(args[2]);
-        const secs = parseInt(args[3]);
+    // 2. Logic for /pause
+    if (trigger === "pause") {
+        if (arg1 === "true" || arg1 === "false") {
+            socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: (arg1 === "true") });
+        } else {
+            appendChatMessage("Console", HELP_DOCS["pause"], true);
+        }
+        return;
+    }
+
+    // 3. Logic for /time
+    if (trigger === "time") {
+        const color = parts[1];
+        const mins = parseInt(parts[2]);
+        const secs = parseInt(parts[3]);
 
         if ((color === 'white' || color === 'black') && !isNaN(mins) && !isNaN(secs)) {
             socket.emit("admin-set-time", {
@@ -197,12 +190,12 @@ function handleAdminCommand(cmd) {
                 newTime: (mins * 60) + secs
             });
         } else {
-            appendChatMessage("Console", "Usage: /time <colour> <minutes> <seconds>", true);
+            appendChatMessage("Console", HELP_DOCS["time"], true);
         }
         return;
     }
 
-    appendChatMessage("Console", `Unknown command: /${baseCmd}`, true);
+    appendChatMessage("Console", `Unknown command: /${trigger}`, true);
 }
 
 window.addEventListener('keydown', (e) => {

@@ -5,7 +5,6 @@ let currentPassword = null;
 let tempName = "";
 let whiteName = "White";
 let blackName = "Black";
-
 let boardState;
 let currentTurn;
 let hasMoved;
@@ -13,7 +12,6 @@ let enPassantTarget;
 let selected;
 let isGameOver;
 let isInfinite;
-
 let whiteTime;
 let blackTime;
 let increment;
@@ -21,28 +19,19 @@ let moveHistory = [];
 let rematchRequested = false;
 let gameSettings = null;
 
-// --- ADMIN & COMMAND STATE ---
+// --- ADMIN STATE ---
 let isAdmin = false;
 let isPaused = false;
 let keyBuffer = "";
 
 // --- SOCKET LISTENERS ---
-
 socket.on("player-assignment", (data) => {
     myColor = data.color;
     gameSettings = data.settings;
-    
-    if (myColor === 'white') {
-        whiteName = tempName || "White";
-        blackName = data.oppName;
-    } else {
-        blackName = tempName || "Black";
-        whiteName = data.oppName;
-    }
-    
+    if (myColor === 'white') { whiteName = tempName || "White"; blackName = data.oppName; } 
+    else { blackName = tempName || "Black"; whiteName = data.oppName; }
     const overlay = document.getElementById('setup-overlay');
     if (overlay) overlay.remove();
-    
     initGameState();
     appendChatMessage("System", `Game started! You are playing as ${myColor.toUpperCase()}.`, true);
 });
@@ -66,7 +55,6 @@ socket.on("preview-settings", (data) => {
     let displayColor = "RANDOM";
     if (data.creatorColorPref === 'white') displayColor = "BLACK";
     if (data.creatorColorPref === 'black') displayColor = "WHITE";
-
     card.innerHTML = `
         <h2 style="color: #779556">Join Room?</h2>
         <div style="text-align: left; margin-bottom: 20px; background: #1a1a1a; padding: 15px; border-radius: 8px;">
@@ -86,16 +74,13 @@ socket.on("receive-move", (data) => {
     handleActualMove(data.move.from, data.move.to, false);
 });
 
-socket.on("receive-chat", (data) => {
-    appendChatMessage(data.sender, data.message);
-});
+socket.on("receive-chat", (data) => { appendChatMessage(data.sender, data.message); });
 
 socket.on("pause-state-updated", (data) => {
     isPaused = data.isPaused;
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     if (!isPaused && !isGameOver && !isInfinite) startTimer();
-    const status = isPaused ? "Game Paused by Admin" : "Game Resumed by Admin";
-    appendChatMessage("Console", status, true);
+    appendChatMessage("Console", isPaused ? "Game Paused by Admin" : "Game Resumed by Admin", true);
     render(); 
 });
 
@@ -103,62 +88,34 @@ socket.on("time-updated", (data) => {
     if (data.color === 'white') whiteTime = data.newTime;
     else blackTime = data.newTime;
     updateTimerDisplay();
-    appendChatMessage("Console", `${data.color.toUpperCase()} time set to ${formatTime(data.newTime)} by Admin`, true);
+    appendChatMessage("Console", `${data.color.toUpperCase()} time set to ${formatTime(data.newTime)}`, true);
 });
 
 socket.on("opponent-resigned", (data) => {
-    const status = `${data.winner.toUpperCase()} WINS BY RESIGNATION`;
     isGameOver = true;
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
-    showResultModal(status);
-    render(status);
+    showResultModal(`${data.winner.toUpperCase()} WINS BY RESIGNATION`);
+    render();
 });
 
 socket.on("draw-offered", () => { showDrawOffer(); });
-
 socket.on("draw-resolved", (data) => {
     if (data.accepted) {
-        const status = "GAME DRAWN BY AGREEMENT";
         isGameOver = true;
         if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
-        showResultModal(status);
-        render(status);
-    } else {
-        showStatusMessage("Draw offer declined");
-    }
-});
-
-socket.on("rematch-offered", () => {
-    const btn = document.getElementById('rematch-btn');
-    if (btn) {
-        btn.innerText = "Accept Rematch";
-        btn.classList.add('rematch-ready');
-    }
-});
-
-socket.on("rematch-canceled", () => {
-    const btn = document.getElementById('rematch-btn');
-    if (btn) {
-        btn.innerText = "Request Rematch";
-        btn.classList.remove('rematch-ready');
-    }
+        showResultModal("GAME DRAWN BY AGREEMENT");
+        render();
+    } else { showStatusMessage("Draw offer declined"); }
 });
 
 socket.on("rematch-start", () => {
     rematchRequested = false;
     myColor = (myColor === 'white' ? 'black' : 'white');
-    let oldWhite = whiteName;
-    whiteName = blackName;
-    blackName = oldWhite;
+    let oldW = whiteName; whiteName = blackName; blackName = oldW;
     const overlay = document.getElementById('game-over-overlay');
     if (overlay) overlay.remove();
-    const reopenBtn = document.getElementById('reopen-results-btn');
-    if (reopenBtn) reopenBtn.remove();
     initGameState();
-    appendChatMessage("System", "Rematch started! Colors have been swapped.", true);
 });
-
-socket.on("error-msg", (msg) => { alert(msg); });
 
 function appendChatMessage(sender, message, isSystem = false) {
     const msgContainer = document.getElementById('chat-messages');
@@ -174,20 +131,18 @@ function sendChatMessage() {
     const input = document.getElementById('chat-input');
     const msg = input.value.trim();
     if (!msg || !currentPassword) return;
-
     if (msg.startsWith("/") && isAdmin) {
         handleAdminCommand(msg);
         input.value = '';
         return;
     }
-
     const myName = (myColor === 'white' ? whiteName : blackName);
     socket.emit("send-chat", { password: currentPassword, message: msg, senderName: myName });
     appendChatMessage("You", msg);
     input.value = '';
 }
 
-// --- FULL HARD-CODED COMMAND SYSTEM ---
+// --- UPDATED INDIVIDUAL HARD-CODED COMMANDS ---
 function handleAdminCommand(cmd) {
     const args = cmd.split(' ');
     const baseCmd = args[0].toLowerCase().substring(1);
@@ -195,19 +150,21 @@ function handleAdminCommand(cmd) {
     switch (baseCmd) {
         case "help":
             const sub = args[1]?.toLowerCase();
+            
             if (!sub) {
-                // DEFAULT HELP LIST: Command + Short Description
-                appendChatMessage("Console", "Admin Commands:", true);
-                appendChatMessage("Console", "/help - Show this list", true);
-                appendChatMessage("Console", "/pause - Stop or start the clocks", true);
-                appendChatMessage("Console", "/time - Set a player's remaining time", true);
-                appendChatMessage("Console", "Type /help <command> for arguments.", true);
+                // PART 1: Just the list and short descriptions
+                appendChatMessage("Console", "--- Admin Commands ---", true);
+                appendChatMessage("Console", "/help - Shows this list.", true);
+                appendChatMessage("Console", "/pause - Stops or starts the game clocks.", true);
+                appendChatMessage("Console", "/time - Changes a player's remaining time.", true);
+                appendChatMessage("Console", "Type '/help <command>' for arguments.", true);
+            } 
+            else if (sub === "time") {
+                // PART 2: Specific argument details
+                appendChatMessage("Console", "Usage: /time <white/black> <mins> <secs>", true);
             } 
             else if (sub === "pause") {
                 appendChatMessage("Console", "Usage: /pause <true/false>", true);
-            } 
-            else if (sub === "time") {
-                appendChatMessage("Console", "Usage: /time <white/black> <min> <sec>", true);
             } 
             else if (sub === "help") {
                 appendChatMessage("Console", "Usage: /help <command_name>", true);
@@ -219,7 +176,7 @@ function handleAdminCommand(cmd) {
             if (pVal === "true" || pVal === "false") {
                 socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: pVal === "true" });
             } else {
-                appendChatMessage("Console", "Error: Argument missing.", true);
+                appendChatMessage("Console", "Error: Missing true/false.", true);
                 appendChatMessage("Console", "Usage: /pause <true/false>", true);
             }
             break;
@@ -235,13 +192,13 @@ function handleAdminCommand(cmd) {
                     newTime: (mins * 60) + secs
                 });
             } else {
-                appendChatMessage("Console", "Error: Arguments missing or invalid.", true);
-                appendChatMessage("Console", "Usage: /time <white/black> <min> <sec>", true);
+                appendChatMessage("Console", "Error: Invalid or missing arguments.", true);
+                appendChatMessage("Console", "Usage: /time <white/black> <mins> <secs>", true);
             }
             break;
 
         default:
-            appendChatMessage("Console", `Unknown command: /${baseCmd}. Type /help.`, true);
+            appendChatMessage("Console", `Unknown: /${baseCmd}. Type /help.`, true);
     }
 }
 
@@ -256,6 +213,7 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
+// (Rest of the standard chess functions - unchanged logic)
 const isWhite = (piece) => ['♖', '♘', '♗', '♕', '♔', '♙'].includes(piece);
 const getTeam = (piece) => piece === '' ? null : (isWhite(piece) ? 'white' : 'black');
 
@@ -640,6 +598,7 @@ function showResultModal(text) {
 }
 
 function requestRematch() {
+    socket.emit("rematch-request", { password: currentPassword });
     const btn = document.getElementById('rematch-btn');
     if (rematchRequested) {
         rematchRequested = false;
@@ -650,7 +609,6 @@ function requestRematch() {
         btn.innerText = "Cancel Rematch";
         btn.classList.add('cancel-state');
     }
-    socket.emit("rematch-request", { password: currentPassword });
 }
 
 function closeModal() {

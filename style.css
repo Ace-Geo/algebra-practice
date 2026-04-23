@@ -53,6 +53,9 @@ body { background: #312e2b; display: flex; align-items: center; justify-content:
 .result-card h2 { color: #779556; margin-top: 0; text-transform: uppercase; }
 .modal-btns-vertical { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
 #rematch-btn { background: #779556; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 16px; }
+
+/* The Red Cancel State */
 .cancel-state { background: #c64242 !important; color: white; }
+
 .rematch-ready { animation: pulse 1.5s infinite; background: #8dbb5c !important; }
 @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }

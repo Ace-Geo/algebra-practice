@@ -187,7 +187,6 @@ function sendChatMessage() {
     input.value = '';
 }
 
-// UPDATED: Specific usage text for help
 const COMMANDS_HELP = {
     "pause": { desc: "Pauses or resumes the game clocks.", usage: "/pause <true or false>" },
     "time": { desc: "Sets the remaining time for a specific player.", usage: "/time <colour> <minutes> <seconds>" },

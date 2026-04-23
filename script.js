@@ -142,39 +142,37 @@ function sendChatMessage() {
     input.value = '';
 }
 
-// --- ADMIN COMMANDS: COMPLETELY HARD-CODED INDIVIDUAL CASES ---
+// --- HARD CODED COMMANDS ---
 function handleAdminCommand(cmd) {
     const args = cmd.split(' ');
     const baseCmd = args[0].toLowerCase().substring(1);
 
-    // CASE 1: /HELP
+    // CASE: HELP
     if (baseCmd === "help") {
         const sub = args[1]?.toLowerCase();
-        
-        // Scenario: Just typing "/help"
+
         if (!sub) {
-            appendChatMessage("Console", "--- Admin Commands ---", true);
-            appendChatMessage("Console", "/help - Shows this list.", true);
-            appendChatMessage("Console", "/pause - Pauses/Resumes the game.", true);
-            appendChatMessage("Console", "/time - Sets player time.", true);
-            appendChatMessage("Console", "Type '/help <command>' for specific usage.", true);
-        } 
-        // Scenario: Typing "/help time"
-        else if (sub === "time") {
-            appendChatMessage("Console", "Usage: /time <colour> <minutes> <seconds>", true);
-        } 
-        // Scenario: Typing "/help pause"
-        else if (sub === "pause") {
-            appendChatMessage("Console", "Usage: /pause <true/false>", true);
-        } 
-        // Scenario: Typing "/help help"
-        else if (sub === "help") {
             appendChatMessage("Console", "Usage: /help <command name>", true);
+            return;
         }
-        return;
+
+        if (sub === "time") {
+            appendChatMessage("Console", "Usage: /time <colour> <minutes> <seconds>", true);
+            return;
+        }
+
+        if (sub === "pause") {
+            appendChatMessage("Console", "Usage: /pause <true/false>", true);
+            return;
+        }
+
+        if (sub === "help") {
+            appendChatMessage("Console", "Usage: /help <command name>", true);
+            return;
+        }
     }
 
-    // CASE 2: /PAUSE
+    // CASE: PAUSE
     if (baseCmd === "pause") {
         const val = args[1]?.toLowerCase();
         if (val === "true") {
@@ -187,7 +185,7 @@ function handleAdminCommand(cmd) {
         return;
     }
 
-    // CASE 3: /TIME
+    // CASE: TIME
     if (baseCmd === "time") {
         const color = args[1]?.toLowerCase();
         const mins = parseInt(args[2]);
@@ -205,8 +203,7 @@ function handleAdminCommand(cmd) {
         return;
     }
 
-    // DEFAULT CASE
-    appendChatMessage("Console", `Unknown command: /${baseCmd}. Type /help.`, true);
+    appendChatMessage("Console", `Unknown command: /${baseCmd}`, true);
 }
 
 window.addEventListener('keydown', (e) => {
@@ -220,7 +217,7 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
-// --- CHESS LOGIC ---
+// --- CHESS ENGINE ---
 const isWhite = (piece) => ['♖', '♘', '♗', '♕', '♔', '♙'].includes(piece);
 const getTeam = (piece) => piece === '' ? null : (isWhite(piece) ? 'white' : 'black');
 

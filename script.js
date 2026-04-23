@@ -90,16 +90,12 @@ socket.on("receive-chat", (data) => {
     appendChatMessage(data.sender, data.message);
 });
 
-// SYNC PAUSE ACROSS CLIENTS
 socket.on("pause-state-updated", (data) => {
     isPaused = data.isPaused;
-    
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
-    
     if (!isPaused && !isGameOver && !isInfinite) {
-        startTimer(); // Restart ticker for both players
+        startTimer();
     }
-
     const status = isPaused ? "Game Paused by Admin" : "Game Resumed by Admin";
     appendChatMessage("Console", status, true);
     render(); 
@@ -137,6 +133,7 @@ socket.on("rematch-offered", () => {
     }
 });
 
+// Listener for when the opponent cancels their request
 socket.on("rematch-cancelled", () => {
     const btn = document.getElementById('rematch-btn');
     if (btn) {
@@ -171,11 +168,9 @@ socket.on("error-msg", (msg) => {
 function appendChatMessage(sender, message, isSystem = false) {
     const msgContainer = document.getElementById('chat-messages');
     if (!msgContainer) return;
-    
     const div = document.createElement('div');
     div.className = isSystem ? 'chat-msg system' : 'chat-msg';
     div.innerHTML = isSystem ? message : `<b>${sender}:</b> ${message}`;
-    
     msgContainer.appendChild(div);
     msgContainer.scrollTop = msgContainer.scrollHeight;
 }
@@ -183,9 +178,7 @@ function appendChatMessage(sender, message, isSystem = false) {
 function sendChatMessage() {
     const input = document.getElementById('chat-input');
     const msg = input.value.trim();
-    
     if (!msg || !currentPassword) return;
-
     if (msg.startsWith("/")) {
         if (isAdmin) {
             handleAdminCommand(msg);
@@ -193,7 +186,6 @@ function sendChatMessage() {
             return;
         }
     }
-
     const myName = (myColor === 'white' ? whiteName : blackName);
     socket.emit("send-chat", {
         password: currentPassword,
@@ -207,18 +199,15 @@ function sendChatMessage() {
 function handleAdminCommand(cmd) {
     const args = cmd.split(' ');
     const baseCmd = args[0].toLowerCase();
-
     if (baseCmd === "/pause") {
         const val = args[1]?.toLowerCase();
         let newState = isPaused;
-
         if (val === "true") newState = true;
         else if (val === "false") newState = false;
         else {
             appendChatMessage("Console", "Usage: /pause true | /pause false", true);
             return;
         }
-
         socket.emit("admin-pause-toggle", {
             password: currentPassword,
             isPaused: newState
@@ -229,15 +218,9 @@ function handleAdminCommand(cmd) {
 }
 
 window.addEventListener('keydown', (e) => {
-    if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') {
-        return;
-    }
-
+    if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
     keyBuffer += e.key;
-    if (keyBuffer.length > 2) {
-        keyBuffer = keyBuffer.slice(-2);
-    }
-
+    if (keyBuffer.length > 2) keyBuffer = keyBuffer.slice(-2);
     if (keyBuffer === "[]") {
         if (!isAdmin) {
             isAdmin = true;
@@ -381,15 +364,12 @@ function isTeamInCheck(team, board) {
 function isMoveLegal(fromR, fromC, toR, toC, team) {
     const piece = boardState[fromR][fromC];
     if (!canMoveTo(fromR, fromC, toR, toC, piece, boardState)) return false;
-
     const nextBoard = boardState.map(row => [...row]);
     nextBoard[toR][toC] = piece;
     nextBoard[fromR][fromC] = '';
-
     if ((piece === '♙' || piece === '♟') && enPassantTarget && enPassantTarget.r === toR && enPassantTarget.c === toC) {
         nextBoard[fromR][toC] = '';
     }
-
     return !isTeamInCheck(team, nextBoard);
 }
 
@@ -413,7 +393,6 @@ function getLegalMoves(team) {
 
 function handleActualMove(from, to, isLocal) {
     if (isGameOver) return;
-
     const movingPiece = boardState[from.r][from.c];
     const targetPiece = boardState[to.r][to.c];
     const team = currentTurn;
@@ -429,12 +408,10 @@ function handleActualMove(from, to, isLocal) {
     }
 
     let notation = getNotation(from.r, from.c, to.r, to.c, movingPiece, targetPiece, isEP, castleType);
-
     if (isEP) boardState[from.r][to.c] = '';
     hasMoved[`${from.r},${from.c}`] = true;
     boardState[to.r][to.c] = movingPiece;
     boardState[from.r][from.c] = '';
-
     if (movingPiece === '♙' && to.r === 0) boardState[to.r][to.c] = '♕';
     if (movingPiece === '♟' && to.r === 7) boardState[to.r][to.c] = '♛';
 
@@ -447,7 +424,6 @@ function handleActualMove(from, to, isLocal) {
         ? { r: (from.r + to.r) / 2, c: to.c } : null;
 
     currentTurn = (team === 'white' ? 'black' : 'white');
-
     const nextMoves = getLegalMoves(currentTurn);
     const inCheck = isTeamInCheck(currentTurn, boardState);
     let forcedStatus = null;
@@ -505,29 +481,22 @@ function render(forcedStatus) {
             <button id="chat-send-btn">Send</button>
         </div>
     `;
-    
     const newInp = chatPanel.querySelector('#chat-input');
     newInp.value = currentTypingValue;
-    
     newInp.addEventListener('keydown', (e) => e.stopPropagation());
     newInp.onkeypress = (e) => {
         e.stopPropagation();
         if (e.key === 'Enter') sendChatMessage();
     };
-    
     chatPanel.querySelector('#chat-send-btn').onclick = sendChatMessage;
     layout.appendChild(chatPanel);
 
     const gameArea = document.createElement('div');
     gameArea.id = 'game-area';
-
     const createPlayerBar = (name, id) => {
         const bar = document.createElement('div');
         bar.className = 'player-bar';
-        bar.innerHTML = `
-            <span class="player-name">${name} ${myColor === id ? '(YOU)' : ''}</span>
-            <div id="timer-${id}" class="timer">--:--</div>
-        `;
+        bar.innerHTML = `<span class="player-name">${name} ${myColor === id ? '(YOU)' : ''}</span><div id="timer-${id}" class="timer">--:--</div>`;
         return bar;
     };
 
@@ -541,7 +510,6 @@ function render(forcedStatus) {
 
     const check = isTeamInCheck(currentTurn, boardState);
     let hints = (selected && !isGameOver) ? getLegalMoves(currentTurn).filter(m => m.from.r === selected.r && m.from.c === selected.c).map(m => m.to) : [];
-
     const range = (myColor === 'black') ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
 
     for (let r of range) {
@@ -549,56 +517,40 @@ function render(forcedStatus) {
             const sq = document.createElement('div');
             const piece = boardState[r][c];
             sq.className = `square ${(r + c) % 2 === 0 ? 'white-sq' : 'black-sq'}`;
-
             if (check && piece === (currentTurn === 'white' ? '♔' : '♚')) sq.classList.add('king-check');
             if (selected && selected.r === r && selected.c === c) sq.classList.add('selected');
-
             if (hints.some(h => h.r === r && h.c === c)) {
                 const hint = document.createElement('div');
                 hint.className = piece === '' ? 'hint-dot' : 'hint-capture';
                 sq.appendChild(hint);
             }
-
             if (piece !== '') {
                 const span = document.createElement('span');
                 span.className = `piece ${isWhite(piece) ? 'w-piece' : 'b-piece'}`;
                 span.textContent = piece;
                 sq.appendChild(span);
             }
-
             sq.onclick = () => {
                 if (isGameOver || currentTurn !== myColor) return;
                 if (selected) {
-                    if (selected.r === r && selected.c === c) {
-                        selected = null;
-                        render();
-                    } else if (hints.some(h => h.r === r && h.c === c)) {
-                        handleActualMove(selected, { r, c }, true);
-                    } else if (getTeam(piece) === currentTurn) {
-                        selected = { r, c };
-                        render();
-                    }
-                } else if (getTeam(piece) === currentTurn) {
-                    selected = { r, c };
-                    render();
-                }
+                    if (selected.r === r && selected.c === c) { selected = null; render(); }
+                    else if (hints.some(h => h.r === r && h.c === c)) handleActualMove(selected, { r, c }, true);
+                    else if (getTeam(piece) === currentTurn) { selected = { r, c }; render(); }
+                } else if (getTeam(piece) === currentTurn) { selected = { r, c }; render(); }
             };
             boardEl.appendChild(sq);
         }
     }
-
     boardCont.appendChild(boardEl);
     gameArea.appendChild(boardCont);
 
     if (myColor === 'black') gameArea.appendChild(createPlayerBar(blackName, 'black'));
     else gameArea.appendChild(createPlayerBar(whiteName, 'white'));
-
     layout.appendChild(gameArea);
 
     const sidePanel = document.createElement('div');
     sidePanel.id = 'side-panel';
     let statusDisplay = forcedStatus || (isGameOver ? "GAME OVER" : `${currentTurn.toUpperCase()}'S TURN ${check ? '(CHECK!)' : ''}`);
-
     sidePanel.innerHTML = `
         <div id="status-box"><div id="status-text">${statusDisplay}</div></div>
         <div id="notification-area"></div>
@@ -608,7 +560,6 @@ function render(forcedStatus) {
         </div>
         <div id="history-container"></div>
     `;
-
     const hist = sidePanel.querySelector('#history-container');
     moveHistory.forEach((m, i) => {
         const row = document.createElement('div');
@@ -622,7 +573,6 @@ function render(forcedStatus) {
         newInp.focus();
         newInp.setSelectionRange(cursorPos, cursorPos);
     }
-
     updateTimerDisplay();
 }
 
@@ -681,18 +631,14 @@ function initGameState() {
     selected = null;
     rematchRequested = false;
     isPaused = false;
-
     if (gameSettings) {
         whiteTime = (parseInt(gameSettings.mins) * 60) + parseInt(gameSettings.secs);
         blackTime = whiteTime;
         increment = parseInt(gameSettings.inc) || 0;
         isInfinite = (whiteTime === 0);
     }
-
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
-    if (!isInfinite) {
-        startTimer();
-    }
+    if (!isInfinite) startTimer();
     render();
 }
 
@@ -708,20 +654,8 @@ function showSetup() {
             <div id="create-sect">
                 <div class="input-group"><label>Room Password</label><input id="roomPass" placeholder="Secret Code"></div>
                 <div class="input-group"><label>Your Name</label><input id="uName" value="Player 1"></div>
-                <div class="input-group"><label>Time Control</label>
-                    <div style="display:flex; gap:5px;">
-                        <input type="number" id="tMin" value="10" title="Minutes">
-                        <input type="number" id="tSec" value="0" title="Seconds">
-                        <input type="number" id="tInc" value="0" title="Increment">
-                    </div>
-                </div>
-                <div class="input-group"><label>Play As</label>
-                    <select id="colorPref">
-                        <option value="random">Random</option>
-                        <option value="white">White</option>
-                        <option value="black">Black</option>
-                    </select>
-                </div>
+                <div class="input-group"><label>Time Control</label><div style="display:flex; gap:5px;"><input type="number" id="tMin" value="10"><input type="number" id="tSec" value="0"><input type="number" id="tInc" value="0"></div></div>
+                <div class="input-group"><label>Play As</label><select id="colorPref"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
                 <button class="start-btn" onclick="createRoom()">CREATE</button>
             </div>
             <div id="join-sect" style="display:none;">
@@ -744,7 +678,7 @@ function switchTab(tab) {
 function createRoom() {
     currentPassword = document.getElementById('roomPass').value;
     tempName = document.getElementById('uName').value;
-    if (!currentPassword) return alert("Enter a room password.");
+    if (!currentPassword) return alert("Enter password.");
     socket.emit("create-room", {
         password: currentPassword,
         name: tempName,
@@ -785,15 +719,7 @@ function offerDraw() {
 
 function showDrawOffer() {
     const area = document.getElementById('notification-area');
-    area.innerHTML = `
-        <div class=\"draw-modal\">
-            Opponent offers a draw
-            <div class=\"modal-btns\">
-                <button class=\"accept-btn\" onclick=\"respondToDraw(true)\">Accept</button>
-                <button class=\"decline-btn\" onclick=\"respondToDraw(false)\">Decline</button>
-            </div>
-        </div>
-    `;
+    area.innerHTML = `<div class="draw-modal">Opponent offers a draw<div class="modal-btns"><button class="accept-btn" onclick="respondToDraw(true)">Accept</button><button class="decline-btn" onclick="respondToDraw(false)">Decline</button></div></div>`;
 }
 
 function respondToDraw(accepted) {
@@ -803,7 +729,7 @@ function respondToDraw(accepted) {
 
 function showStatusMessage(msg) {
     const area = document.getElementById('notification-area');
-    area.innerHTML = `<div style=\"background:#4b4845; padding:10px; border-radius:4px; font-size:12px; text-align:center;\">${msg}</div>`;
+    area.innerHTML = `<div style="background:#4b4845; padding:10px; border-radius:4px; font-size:12px; text-align:center;">${msg}</div>`;
     setTimeout(() => { area.innerHTML = ''; }, 3000);
 }
 
@@ -811,19 +737,20 @@ function showResultModal(text) {
     const overlay = document.createElement('div');
     overlay.id = 'game-over-overlay';
     overlay.innerHTML = `
-        <div class=\"result-card\">
+        <div class="result-card">
             <h2>Game Over</h2>
             <p>${text}</p>
-            <div class=\"modal-btns-vertical\">
-                <button id=\"rematch-btn\" onclick=\"requestRematch()\">Request Rematch</button>
-                <button class=\"action-btn\" onclick=\"closeModal()\">View Board</button>
-                <button class=\"action-btn\" style=\"background:#444\" onclick=\"location.reload()\">New Game</button>
+            <div class="modal-btns-vertical">
+                <button id="rematch-btn" onclick="requestRematch()">Request Rematch</button>
+                <button class="action-btn" onclick="closeModal()">View Board</button>
+                <button class="action-btn" style="background:#444" onclick="location.reload()">New Game</button>
             </div>
         </div>
     `;
     document.body.appendChild(overlay);
 }
 
+// TOGGLE LOGIC: Change button state and emit cancel if already requested
 function requestRematch() {
     const btn = document.getElementById('rematch-btn');
     if (!rematchRequested) {

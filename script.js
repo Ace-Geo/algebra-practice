@@ -187,56 +187,56 @@ function sendChatMessage() {
     input.value = '';
 }
 
-// 1. IMPROVED OBJECT DEFINITION
-const COMMANDS_HELP = {
-    "pause": { desc: "Pauses or resumes the game clocks.", usage: "/pause <true or false>" },
-    "time": { desc: "Sets the remaining time for a specific player.", usage: "/time <colour> <minutes> <seconds>" },
-    "help": { desc: "Lists all commands or shows usage for one.", usage: "/help <command name>" }
-};
-
+// --- HARD-CODED ADMIN LOGIC ---
 function handleAdminCommand(cmd) {
     const args = cmd.split(' ');
     const baseCmd = args[0].toLowerCase().substring(1);
 
-    if (baseCmd === "help") {
-        const sub = args[1]?.toLowerCase();
-        // 2. LOGIC FIX: Check if sub-command exists in our help object
-        if (sub && COMMANDS_HELP[sub]) {
-            appendChatMessage("Console", `Usage: ${COMMANDS_HELP[sub].usage}`, true);
-        } else {
-            appendChatMessage("Console", "Available Commands:", true);
-            for (const key in COMMANDS_HELP) {
-                appendChatMessage("Console", `/${key} - ${COMMANDS_HELP[key].desc}`, true);
+    switch (baseCmd) {
+        case "help":
+            const sub = args[1]?.toLowerCase();
+            if (sub === "pause") {
+                appendChatMessage("Console", "Usage: /pause <true/false>", true);
+                appendChatMessage("Console", "Info: true pauses, false resumes.", true);
+            } 
+            else if (sub === "time") {
+                appendChatMessage("Console", "Usage: /time <white/black> <min> <sec>", true);
+                appendChatMessage("Console", "Info: Overwrites current clock time.", true);
+            } 
+            else {
+                appendChatMessage("Console", "Commands: /pause, /time, /help", true);
+                appendChatMessage("Console", "Type /help <cmd> for more details.", true);
             }
-        }
-    } 
-    else if (baseCmd === "pause") {
-        const val = args[1]?.toLowerCase();
-        if (val === "true" || val === "false") {
-            socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: val === "true" });
-        } else {
-            // 3. FALLBACK FIX: Pull usage directly from the object if arguments are wrong
-            appendChatMessage("Console", "Command missing arguments.", true);
-            appendChatMessage("Console", `Usage: ${COMMANDS_HELP.pause.usage}`, true);
-        }
-    } 
-    else if (baseCmd === "time") {
-        const targetColor = args[1]?.toLowerCase();
-        const mins = parseInt(args[2]);
-        const secs = parseInt(args[3]);
-        if ((targetColor === 'white' || targetColor === 'black') && !isNaN(mins) && !isNaN(secs)) {
-            socket.emit("admin-set-time", {
-                password: currentPassword,
-                color: targetColor,
-                newTime: (mins * 60) + secs
-            });
-        } else {
-            // 4. FALLBACK FIX: Pull usage directly from the object if arguments are wrong
-            appendChatMessage("Console", "Command missing arguments.", true);
-            appendChatMessage("Console", `Usage: ${COMMANDS_HELP.time.usage}`, true);
-        }
-    } else {
-        appendChatMessage("Console", `Unknown command. Type /help to see all.`, true);
+            break;
+
+        case "pause":
+            const pVal = args[1]?.toLowerCase();
+            if (pVal === "true" || pVal === "false") {
+                socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: pVal === "true" });
+            } else {
+                appendChatMessage("Console", "Error: Missing true/false.", true);
+                appendChatMessage("Console", "Usage: /pause <true/false>", true);
+            }
+            break;
+
+        case "time":
+            const target = args[1]?.toLowerCase();
+            const mins = parseInt(args[2]);
+            const secs = parseInt(args[3]);
+            if ((target === 'white' || target === 'black') && !isNaN(mins) && !isNaN(secs)) {
+                socket.emit("admin-set-time", {
+                    password: currentPassword,
+                    color: target,
+                    newTime: (mins * 60) + secs
+                });
+            } else {
+                appendChatMessage("Console", "Error: Missing arguments.", true);
+                appendChatMessage("Console", "Usage: /time <white/black> <min> <sec>", true);
+            }
+            break;
+
+        default:
+            appendChatMessage("Console", `Unknown command: /${baseCmd}`, true);
     }
 }
 

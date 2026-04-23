@@ -821,11 +821,12 @@ function requestRematch() {
     if (rematchRequested) {
         rematchRequested = false;
         btn.innerText = "Request Rematch";
-        btn.classList.remove('rematch-ready');
+        btn.classList.remove('cancel-state');
         socket.emit("rematch-request", { password: currentPassword });
     } else {
         rematchRequested = true;
-        btn.innerText = "Waiting...";
+        btn.innerText = "Cancel Rematch";
+        btn.classList.add('cancel-state');
         socket.emit("rematch-request", { password: currentPassword });
     }
 }

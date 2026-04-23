@@ -90,14 +90,12 @@ socket.on("receive-chat", (data) => {
     appendChatMessage(data.sender, data.message);
 });
 
-// SYNC PAUSE ACROSS CLIENTS
 socket.on("pause-state-updated", (data) => {
     isPaused = data.isPaused;
-    
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     
     if (!isPaused && !isGameOver && !isInfinite) {
-        startTimer(); // Restart ticker for both players
+        startTimer(); 
     }
 
     const status = isPaused ? "Game Paused by Admin" : "Game Resumed by Admin";
@@ -135,6 +133,18 @@ socket.on("rematch-offered", () => {
         btn.innerText = "Accept Rematch";
         btn.classList.add('rematch-ready');
     }
+});
+
+socket.on("rematch-cancelled", () => {
+    const btn = document.getElementById('rematch-btn');
+    if (btn) {
+        btn.innerText = "Request Rematch";
+        btn.classList.remove('rematch-ready');
+        btn.style.background = "#779556";
+        btn.disabled = false;
+        rematchRequested = false;
+    }
+    showStatusMessage("Opponent withdrew rematch offer.");
 });
 
 socket.on("rematch-start", () => {
@@ -558,7 +568,7 @@ function render(forcedStatus) {
             }
 
             sq.onclick = () => {
-                if (isGameOver || currentTurn !== myColor) return;
+                if (isGameOver || isPaused || currentTurn !== myColor) return;
                 if (selected) {
                     if (selected.r === r && selected.c === c) {
                         selected = null;
@@ -588,7 +598,7 @@ function render(forcedStatus) {
 
     const sidePanel = document.createElement('div');
     sidePanel.id = 'side-panel';
-    let statusDisplay = forcedStatus || (isGameOver ? "GAME OVER" : `${currentTurn.toUpperCase()}'S TURN ${check ? '(CHECK!)' : ''}`);
+    let statusDisplay = forcedStatus || (isPaused ? "PAUSED" : (isGameOver ? "GAME OVER" : `${currentTurn.toUpperCase()}'S TURN ${check ? '(CHECK!)' : ''}`));
 
     sidePanel.innerHTML = `
         <div id="status-box"><div id="status-text">${statusDisplay}</div></div>
@@ -816,12 +826,18 @@ function showResultModal(text) {
 }
 
 function requestRematch() {
-    if (rematchRequested) return;
-    rematchRequested = true;
     const btn = document.getElementById('rematch-btn');
-    btn.innerText = "Waiting...";
-    btn.disabled = true;
-    socket.emit("rematch-request", { password: currentPassword });
+    if (!rematchRequested) {
+        rematchRequested = true;
+        btn.innerText = "Cancel Rematch";
+        btn.style.background = "#883333";
+        socket.emit("rematch-request", { password: currentPassword });
+    } else {
+        rematchRequested = false;
+        btn.innerText = "Request Rematch";
+        btn.style.background = "#779556";
+        socket.emit("cancel-rematch", { password: currentPassword });
+    }
 }
 
 function closeModal() {

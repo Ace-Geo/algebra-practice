@@ -3,7 +3,7 @@ const socket = io("https://algebra-but-better.onrender.com");
 let myColor = null;
 let currentPassword = null;
 let tempName = "";
-let whiteName = "Whites";
+let whiteName = "White";
 let blackName = "Black";
 let boardState;
 let currentTurn;

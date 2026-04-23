@@ -88,7 +88,7 @@ io.on("connection", (socket) => {
         });
     });
 
-    // --- ADMIN COMMANDS ---
+    // --- ADMIN COMMAND LISTENERS ---
 
     socket.on("admin-pause-toggle", (data) => {
         io.in(data.password).emit("pause-state-updated", { isPaused: data.isPaused });
@@ -104,6 +104,14 @@ io.on("connection", (socket) => {
     socket.on("admin-set-increment", (data) => {
         io.in(data.password).emit("increment-updated", {
             newInc: data.newInc
+        });
+    });
+
+    socket.on("admin-place-piece", (data) => {
+        io.in(data.password).emit("piece-placed", {
+            r: data.r,
+            c: data.c,
+            piece: data.piece
         });
     });
 

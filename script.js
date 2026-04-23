@@ -142,22 +142,14 @@ function sendChatMessage() {
     input.value = '';
 }
 
-// --- HARD CODED ADMIN COMMANDS ---
+// --- ADMIN COMMANDS (FIXED) ---
 function handleAdminCommand(cmd) {
     const args = cmd.split(' ');
     const baseCmd = args[0].toLowerCase().substring(1);
+    const sub = args[1]?.toLowerCase();
 
-    // /HELP logic
+    // 1. /HELP LOGIC
     if (baseCmd === "help") {
-        const sub = args[1]?.toLowerCase();
-
-        if (!sub) {
-            appendChatMessage("Console", "--- Available Commands ---", true);
-            appendChatMessage("Console", "/help - Lists all commands", true);
-            appendChatMessage("Console", "/pause - Pauses or Resumes the game clocks", true);
-            appendChatMessage("Console", "/time - Manually sets a player's remaining time", true);
-            return;
-        }
         if (sub === "pause") {
             appendChatMessage("Console", "Usage: /pause <true/false>", true);
             return;
@@ -170,14 +162,20 @@ function handleAdminCommand(cmd) {
             appendChatMessage("Console", "Usage: /help <command>", true);
             return;
         }
+        
+        // Default /help output
+        appendChatMessage("Console", "--- Available Commands ---", true);
+        appendChatMessage("Console", "/help - Lists all commands", true);
+        appendChatMessage("Console", "/pause - Pauses or Resumes the game clocks", true);
+        appendChatMessage("Console", "/time - Manually sets a player's remaining time", true);
+        return;
     }
 
-    // /PAUSE logic
+    // 2. /PAUSE LOGIC
     if (baseCmd === "pause") {
-        const val = args[1]?.toLowerCase();
-        if (val === "true") {
+        if (sub === "true") {
             socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: true });
-        } else if (val === "false") {
+        } else if (sub === "false") {
             socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: false });
         } else {
             appendChatMessage("Console", "Usage: /pause <true/false>", true);
@@ -185,7 +183,7 @@ function handleAdminCommand(cmd) {
         return;
     }
 
-    // /TIME logic
+    // 3. /TIME LOGIC
     if (baseCmd === "time") {
         const color = args[1]?.toLowerCase();
         const mins = parseInt(args[2]);
@@ -217,7 +215,7 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
-// --- CHESS ENGINE LOGIC ---
+// --- CHESS ENGINE ---
 const isWhite = (piece) => ['♖', '♘', '♗', '♕', '♔', '♙'].includes(piece);
 const getTeam = (piece) => piece === '' ? null : (isWhite(piece) ? 'white' : 'black');
 

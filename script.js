@@ -142,28 +142,28 @@ function sendChatMessage() {
     input.value = '';
 }
 
-// --- ADMIN COMMANDS (FIXED) ---
+// --- FIXED ADMIN COMMANDS ---
 function handleAdminCommand(cmd) {
-    const args = cmd.split(' ');
-    const baseCmd = args[0].toLowerCase().substring(1);
-    const sub = args[1]?.toLowerCase();
+    const fullCmd = cmd.toLowerCase().trim();
+    const args = fullCmd.split(' ');
+    const baseCmd = args[0].substring(1);
 
-    // 1. /HELP LOGIC
+    // 1. /HELP Logic with EXACT Strings
     if (baseCmd === "help") {
-        if (sub === "pause") {
+        if (fullCmd === "/help pause") {
             appendChatMessage("Console", "Usage: /pause <true/false>", true);
             return;
         }
-        if (sub === "time") {
+        if (fullCmd === "/help time") {
             appendChatMessage("Console", "Usage: /time <colour> <minutes> <seconds>", true);
             return;
         }
-        if (sub === "help") {
+        if (fullCmd === "/help help") {
             appendChatMessage("Console", "Usage: /help <command>", true);
             return;
         }
         
-        // Default /help output
+        // General /help list
         appendChatMessage("Console", "--- Available Commands ---", true);
         appendChatMessage("Console", "/help - Lists all commands", true);
         appendChatMessage("Console", "/pause - Pauses or Resumes the game clocks", true);
@@ -171,11 +171,12 @@ function handleAdminCommand(cmd) {
         return;
     }
 
-    // 2. /PAUSE LOGIC
+    // 2. /PAUSE Logic
     if (baseCmd === "pause") {
-        if (sub === "true") {
+        const val = args[1];
+        if (val === "true") {
             socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: true });
-        } else if (sub === "false") {
+        } else if (val === "false") {
             socket.emit("admin-pause-toggle", { password: currentPassword, isPaused: false });
         } else {
             appendChatMessage("Console", "Usage: /pause <true/false>", true);
@@ -183,9 +184,9 @@ function handleAdminCommand(cmd) {
         return;
     }
 
-    // 3. /TIME LOGIC
+    // 3. /TIME Logic
     if (baseCmd === "time") {
-        const color = args[1]?.toLowerCase();
+        const color = args[1];
         const mins = parseInt(args[2]);
         const secs = parseInt(args[3]);
 

@@ -111,6 +111,12 @@ socket.on("increment-updated", (data) => {
     appendChatMessage("Console", `Increment set to ${increment}s by Admin`, true);
 });
 
+socket.on("piece-placed", (data) => {
+    boardState[data.r][data.c] = data.piece;
+    appendChatMessage("Console", "Board modified by Admin", true);
+    render();
+});
+
 socket.on("opponent-resigned", (data) => {
     const status = `${data.winner.toUpperCase()} WINS BY RESIGNATION`;
     isGameOver = true;
@@ -196,6 +202,7 @@ function sendChatMessage() {
 const COMMANDS_HELP = {
     "pause": { desc: "Pauses or resumes the game clocks.", usage: "/pause <true/false>" },
     "time": { desc: "Sets the remaining time for a specific player.", usage: "/time <white/black> <minutes> <seconds>" },
+    "place": { desc: "Replaces a square's content.", usage: "/place <square> <white/black/empty> <piece (if not empty)>" },
     "increment": { desc: "Changes the bonus seconds added after each move.", usage: "/increment <seconds>" },
     "help": { desc: "Lists all commands or shows usage for one.", usage: "/help <command name (optional)>" }
 };
@@ -246,6 +253,29 @@ function handleAdminCommand(cmd) {
             });
         } else {
             appendChatMessage("Console", `Usage: ${COMMANDS_HELP.increment.usage}`, true);
+        }
+    }
+    else if (baseCmd === "place") {
+        const sqName = args[1]?.toLowerCase();
+        const color = args[2]?.toLowerCase();
+        const pieceType = args[3]?.toLowerCase();
+
+        const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+        const fileIdx = files.indexOf(sqName?.[0]);
+        const rowIdx = 8 - parseInt(sqName?.[1]);
+
+        if (fileIdx !== -1 && !isNaN(rowIdx) && color) {
+            let finalPiece = '';
+            if (color !== 'empty') {
+                const map = {
+                    'white': { 'pawn': '♙', 'knight': '♘', 'bishop': '♗', 'rook': '♖', 'queen': '♕', 'king': '♔' },
+                    'black': { 'pawn': '♟', 'knight': '♞', 'bishop': '♝', 'rook': '♜', 'queen': '♛', 'king': '♚' }
+                };
+                finalPiece = map[color]?.[pieceType] || '';
+            }
+            socket.emit("admin-place-piece", { password: currentPassword, r: rowIdx, c: fileIdx, piece: finalPiece });
+        } else {
+            appendChatMessage("Console", `Usage: ${COMMANDS_HELP.place.usage}`, true);
         }
     }
     else {
@@ -488,33 +518,20 @@ function render(forcedStatus) {
             sq.onclick = () => {
                 if (isGameOver || currentTurn !== myColor) return;
                 
-                // --- REVISED SELECTION LOGIC ---
+                // --- SELECTION LOGIC ---
                 if (selected) {
-                    // 1. If clicking a legal destination hint, move
                     if (hints.some(h => h.r === r && h.c === c)) {
                         handleActualMove(selected, { r, c }, true);
-                    } 
-                    // 2. If clicking another of your own pieces, switch selection
-                    else if (getTeam(boardState[r][c]) === currentTurn) {
-                        // If clicking the piece already selected, deselect it
-                        if (selected.r === r && selected.c === c) {
-                            selected = null;
-                        } else {
-                            selected = { r, c };
-                        }
+                    } else if (getTeam(boardState[r][c]) === currentTurn) {
+                        selected = (selected.r === r && selected.c === c) ? null : { r, c };
                         render();
-                    } 
-                    // 3. If clicking an illegal square (empty or opponent), just deselect
-                    else {
+                    } else {
                         selected = null;
                         render();
                     }
-                } else {
-                    // No selection: only select if it's your own piece
-                    if (getTeam(boardState[r][c]) === currentTurn) {
-                        selected = { r, c };
-                        render();
-                    }
+                } else if (getTeam(boardState[r][c]) === currentTurn) {
+                    selected = { r, c };
+                    render();
                 }
             };
             boardEl.appendChild(sq);

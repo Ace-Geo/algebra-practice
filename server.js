@@ -4,8 +4,38 @@ const http = require('http').createServer(app);
 const io = require("socket.io")(http, { cors: { origin: "*" } });
 
 const PORT = process.env.PORT || 3000;
-const rooms = {}; 
-const roomRematchStates = {}; 
+const rooms = {};
+const roomRematchStates = {};
+
+function getNextSpectatorId(room) {
+    const used = new Set(Object.values(room.spectators).map((s) => s.id));
+    let id = 1;
+    while (used.has(id)) id++;
+    return id;
+}
+
+function buildSpectatorList(room) {
+    return Object.values(room.spectators)
+        .sort((a, b) => a.id - b.id)
+        .map((s) => ({ id: s.id, name: s.name, isAdmin: s.isAdmin }));
+}
+
+function emitSpectatorList(roomPass) {
+    const room = rooms[roomPass];
+    if (!room) return;
+    io.in(roomPass).emit("spectator-list-updated", { spectators: buildSpectatorList(room) });
+}
+
+function buildActiveGames() {
+    return Object.entries(rooms)
+        .filter(([, room]) => room.status === "active" && room.players.white && room.players.black)
+        .map(([password, room]) => ({
+            password,
+            whiteName: room.players.whiteName || "White",
+            blackName: room.players.blackName || "Black",
+            settings: room.settings
+        }));
+}
 
 io.on("connection", (socket) => {
     socket.on("create-room", (data) => {
@@ -20,7 +50,8 @@ io.on("connection", (socket) => {
             creatorName: name,
             settings: { mins, secs, inc, colorPref },
             status: "waiting",
-            players: { white: null, black: null }
+            players: { white: null, black: null, whiteName: null, blackName: null },
+            spectators: {}
         };
         socket.emit("room-created", { password });
     });
@@ -64,17 +95,58 @@ io.on("connection", (socket) => {
 
         room.players.white = whiteId;
         room.players.black = blackId;
+        room.players.whiteName = whiteId === creatorId ? room.creatorName : name;
+        room.players.blackName = blackId === creatorId ? room.creatorName : name;
 
-        io.to(creatorId).emit("player-assignment", { 
-            color: creatorId === whiteId ? 'white' : 'black', 
+        io.to(creatorId).emit("player-assignment", {
+            color: creatorId === whiteId ? 'white' : 'black',
             settings: room.settings,
             oppName: name
         });
-        io.to(joinerId).emit("player-assignment", { 
-            color: joinerId === whiteId ? 'white' : 'black', 
+        io.to(joinerId).emit("player-assignment", {
+            color: joinerId === whiteId ? 'white' : 'black',
             settings: room.settings,
             oppName: room.creatorName
         });
+    });
+
+    socket.on("list-active-games", () => {
+        socket.emit("active-games", { games: buildActiveGames() });
+    });
+
+    socket.on("spectate-game", (data) => {
+        const { password, name } = data;
+        const room = rooms[password];
+        if (!room || room.status !== "active" || !room.players.white || !room.players.black) {
+            socket.emit("error-msg", "Game not available for spectating.");
+            return;
+        }
+
+        socket.join(password);
+        const spectatorId = getNextSpectatorId(room);
+        room.spectators[socket.id] = { id: spectatorId, name, isAdmin: false };
+
+        socket.emit("spectator-assignment", {
+            password,
+            spectatorId,
+            name,
+            settings: room.settings,
+            whiteName: room.players.whiteName,
+            blackName: room.players.blackName
+        });
+
+        emitSpectatorList(password);
+        io.in(password).emit("receive-chat", {
+            sender: "System",
+            message: `${name} is now spectating the game.`
+        });
+
+        io.to(room.players.white).emit("spectator-sync-needed", { requesterId: socket.id });
+        io.to(room.players.black).emit("spectator-sync-needed", { requesterId: socket.id });
+    });
+
+    socket.on("spectator-state-sync", (data) => {
+        io.to(data.targetSocketId).emit("spectator-state-sync", { state: data.state });
     });
 
     socket.on("send-move", (data) => {
@@ -82,7 +154,7 @@ io.on("connection", (socket) => {
     });
 
     socket.on("send-chat", (data) => {
-        socket.to(data.password).emit("receive-chat", {
+        io.in(data.password).emit("receive-chat", {
             message: data.message,
             sender: data.senderName
         });
@@ -119,7 +191,24 @@ io.on("connection", (socket) => {
     });
 
     socket.on("admin-permission-toggle", (data) => {
+        const room = rooms[data.password];
+        if (!room) return;
+
+        if (data.targetType === "spectator") {
+            const spectator = Object.values(room.spectators).find((s) => s.id === data.spectatorId);
+            if (!spectator) return;
+            spectator.isAdmin = data.isAdmin;
+            io.in(data.password).emit("permission-updated", {
+                targetType: "spectator",
+                spectatorId: data.spectatorId,
+                isAdmin: data.isAdmin
+            });
+            emitSpectatorList(data.password);
+            return;
+        }
+
         io.in(data.password).emit("permission-updated", {
+            targetType: "player",
             targetColor: data.targetColor,
             isAdmin: data.isAdmin
         });
@@ -141,7 +230,7 @@ io.on("connection", (socket) => {
     socket.on("rematch-request", (data) => {
         const pass = data.password;
         if (!roomRematchStates[pass]) roomRematchStates[pass] = new Set();
-        
+
         if (roomRematchStates[pass].has(socket.id)) {
             roomRematchStates[pass].delete(socket.id);
             socket.to(pass).emit("rematch-canceled");
@@ -157,9 +246,18 @@ io.on("connection", (socket) => {
     });
 
     socket.on("disconnecting", () => {
-        socket.rooms.forEach(roomPass => {
-            if (rooms[roomPass]) delete rooms[roomPass];
-            if (roomRematchStates[roomPass]) delete roomRematchStates[roomPass];
+        Object.entries(rooms).forEach(([roomPass, room]) => {
+            if (room.spectators[socket.id]) {
+                delete room.spectators[socket.id];
+                emitSpectatorList(roomPass);
+                return;
+            }
+
+            const isPlayer = room.creatorId === socket.id || room.players.white === socket.id || room.players.black === socket.id;
+            if (isPlayer) {
+                delete rooms[roomPass];
+                if (roomRematchStates[roomPass]) delete roomRematchStates[roomPass];
+            }
         });
     });
 });

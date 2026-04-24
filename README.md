@@ -8,7 +8,7 @@
   Click a piece to see all legal moves for that piece.  
   Use the sidebar to offer draws or resign.  
 ## Future Features Being Worked On:  
-  Allowing you to choose what piece to promote to instead of auto-queening.
-  Threefold repetition detection.
-  Fifty move rule detection.
+  Allowing you to choose what piece to promote to instead of auto-queening.  
+  Threefold repetition detection.  
+  Fifty move rule detection.  
   Draw by insufficient material detection.

@@ -157,33 +157,17 @@ io.on("connection", (socket) => {
 
         if (room.players.white === socket.id) {
             room.players.whiteAdmin = true;
-            io.in(data.password).emit("permission-updated", {
-                targetType: "player",
-                targetColor: "white",
-                isAdmin: true
-            });
             return;
         }
 
         if (room.players.black === socket.id) {
             room.players.blackAdmin = true;
-            io.in(data.password).emit("permission-updated", {
-                targetType: "player",
-                targetColor: "black",
-                isAdmin: true
-            });
             return;
         }
 
         const spectator = room.spectators[socket.id];
         if (spectator) {
             spectator.isAdmin = true;
-            io.in(data.password).emit("permission-updated", {
-                targetType: "spectator",
-                spectatorId: spectator.id,
-                isAdmin: true
-            });
-            emitSpectatorList(data.password);
         }
     });
 
@@ -203,7 +187,7 @@ io.on("connection", (socket) => {
     });
 
     socket.on("send-chat", (data) => {
-        io.in(data.password).emit("receive-chat", {
+        socket.to(data.password).emit("receive-chat", {
             message: data.message,
             sender: data.senderName
         });

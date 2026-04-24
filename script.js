@@ -457,37 +457,35 @@ function handleActualMove(from, to, isLocal) {
 }
 
 function render(forcedStatus) {
-    const layout = document.getElementById('main-layout'); if (!layout) return;
-    const oldInput = document.getElementById('chat-input');
-    const isChatFocused = (document.activeElement === oldInput);
-    const cursorPos = oldInput ? oldInput.selectionStart : 0;
-    const currentTypingValue = oldInput ? oldInput.value : "";
-    const existingMessagesHTML = document.getElementById('chat-messages')?.innerHTML || "";
-    
-    layout.innerHTML = '';
-    const chatPanel = document.createElement('div');
-    chatPanel.id = 'chat-panel';
-    chatPanel.innerHTML = `
-        <div id="chat-header">GAME CHAT</div>
-        <div id="chat-messages">${existingMessagesHTML}</div>
-        <div id="chat-input-area">
-            <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
-            <button id="chat-send-btn">Send</button>
-        </div>
-    `;
-    
-    // --- FORCE CHAT TO BOTTOM AFTER RENDER ---
-    setTimeout(() => {
-        const msgContainer = document.getElementById('chat-messages');
-        if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
-    }, 0);
+    const layout = document.getElementById('main-layout'); 
+    if (!layout) return;
 
-    const newInp = chatPanel.querySelector('#chat-input');
-    newInp.value = currentTypingValue;
-    newInp.addEventListener('keydown', (e) => e.stopPropagation());
-    newInp.onkeypress = (e) => { e.stopPropagation(); if (e.key === 'Enter') sendChatMessage(); };
-    chatPanel.querySelector('#chat-send-btn').onclick = sendChatMessage;
-    layout.appendChild(chatPanel);
+    // --- CHAT INITIALIZATION (Only happens once) ---
+    if (!document.getElementById('chat-panel')) {
+        const chatPanel = document.createElement('div');
+        chatPanel.id = 'chat-panel';
+        chatPanel.innerHTML = `
+            <div id="chat-header">GAME CHAT</div>
+            <div id="chat-messages"></div>
+            <div id="chat-input-area">
+                <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+                <button id="chat-send-btn">Send</button>
+            </div>
+        `;
+        const newInp = chatPanel.querySelector('#chat-input');
+        newInp.addEventListener('keydown', (e) => e.stopPropagation());
+        newInp.onkeypress = (e) => { e.stopPropagation(); if (e.key === 'Enter') sendChatMessage(); };
+        chatPanel.querySelector('#chat-send-btn').onclick = sendChatMessage;
+        layout.appendChild(chatPanel);
+    }
+
+    // --- CLEAN RE-RENDER FOR GAME AREA & SIDE PANEL ---
+    // Remove old versions of board and sidebar to prevent duplicates
+    const oldGame = document.getElementById('game-area');
+    const oldSide = document.getElementById('side-panel');
+    if(oldGame) oldGame.remove();
+    if(oldSide) oldSide.remove();
+
     const gameArea = document.createElement('div');
     gameArea.id = 'game-area';
     const createPlayerBar = (name, id) => {
@@ -496,15 +494,19 @@ function render(forcedStatus) {
         bar.innerHTML = `<span class="player-name">${name} ${myColor === id ? '(YOU)' : ''}</span><div id="timer-${id}" class="timer">--:--</div>`;
         return bar;
     };
+    
     if (myColor === 'black') gameArea.appendChild(createPlayerBar(whiteName, 'white'));
     else gameArea.appendChild(createPlayerBar(blackName, 'black'));
+    
     const boardCont = document.createElement('div');
     boardCont.id = 'board-container';
     const boardEl = document.createElement('div');
     boardEl.id = 'board';
+    
     const check = isTeamInCheck(currentTurn, boardState);
     let hints = (selected && !isGameOver) ? getLegalMoves(currentTurn).filter(m => m.from.r === selected.r && m.from.c === selected.c).map(m => m.to) : [];
     const range = (myColor === 'black') ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
+    
     for (let r of range) {
         for (let c of range) {
             const sq = document.createElement('div'); sq.className = `square ${(r + c) % 2 === 0 ? 'white-sq' : 'black-sq'}`;
@@ -539,9 +541,12 @@ function render(forcedStatus) {
         }
     }
     boardCont.appendChild(boardEl); gameArea.appendChild(boardCont);
+    
     if (myColor === 'black') gameArea.appendChild(createPlayerBar(blackName, 'black'));
     else gameArea.appendChild(createPlayerBar(whiteName, 'white'));
+    
     layout.appendChild(gameArea);
+    
     const sidePanel = document.createElement('div');
     sidePanel.id = 'side-panel';
     let statusDisplay = forcedStatus || (isGameOver ? "GAME OVER" : `${currentTurn.toUpperCase()}'S TURN ${check ? '(CHECK!)' : ''}`);
@@ -561,7 +566,7 @@ function render(forcedStatus) {
         hist.appendChild(row);
     });
     layout.appendChild(sidePanel);
-    if (isChatFocused) { newInp.focus(); newInp.setSelectionRange(cursorPos, cursorPos); }
+    
     updateTimerDisplay();
 }
 

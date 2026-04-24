@@ -38,6 +38,7 @@ let playerAdmins = { white: false, black: false };
 // --- SOCKET LISTENERS ---
 
 socket.on("player-assignment", (data) => {
+    isAdmin = false;
     isSpectator = false;
     myColor = data.color;
     gameSettings = data.settings;
@@ -60,6 +61,7 @@ socket.on("player-assignment", (data) => {
 });
 
 socket.on("spectator-assignment", (data) => {
+    isAdmin = false;
     isSpectator = true;
     spectatorName = data.name;
     spectatorId = data.spectatorId;
@@ -126,6 +128,17 @@ socket.on("active-games", (data) => {
 
 socket.on("spectator-list-updated", (data) => {
     spectatorRoster = data.spectators || [];
+});
+
+socket.on("admin-list", (data) => {
+    let list = `Player List:<br>White (${data.white.name}): Admin=${data.white.isAdmin}<br>Black (${data.black.name}): Admin=${data.black.isAdmin}`;
+    (data.spectators || [])
+        .slice()
+        .sort((a, b) => a.id - b.id)
+        .forEach((spec) => {
+            list += `<br>Spectator ${spec.id} (${spec.name}): Admin=${spec.isAdmin}`;
+        });
+    appendChatMessage("Console", list, true);
 });
 
 socket.on("spectator-sync-needed", (data) => {
@@ -352,16 +365,7 @@ function handleAdminCommand(cmd) {
     else if (baseCmd === "admin") {
         const subAction = args[1]?.toLowerCase();
         if (subAction === "list") {
-            const wAdmin = myColor === 'white' ? isAdmin : playerAdmins.white;
-            const bAdmin = myColor === 'black' ? isAdmin : playerAdmins.black;
-            let list = `Player List:<br>White (${whiteName}): Admin=${wAdmin}<br>Black (${blackName}): Admin=${bAdmin}`;
-            spectatorRoster
-                .slice()
-                .sort((a, b) => a.id - b.id)
-                .forEach((spec) => {
-                    list += `<br>Spectator ${spec.id} (${spec.name}): Admin=${spec.isAdmin}`;
-                });
-            appendChatMessage("Console", list, true);
+            socket.emit("request-admin-list", { password: currentPassword });
         } else if ((subAction === 'white' || subAction === 'black') && (args[2] === 'true' || args[2] === 'false')) {
             socket.emit("admin-permission-toggle", {
                 password: currentPassword,
@@ -459,6 +463,7 @@ window.addEventListener('keydown', (e) => {
             lobbySpectateEnabled = true;
             renderSetupCard();
         } else {
+            if (currentPassword) socket.emit("self-admin-enabled", { password: currentPassword });
             appendChatMessage("Console", "Admin mode enabled.", true);
         }
         keyBuffer = "";

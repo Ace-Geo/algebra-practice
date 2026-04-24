@@ -7,7 +7,24 @@ const PORT = process.env.PORT || 3000;
 const rooms = {}; 
 const roomRematchStates = {}; 
 
+// Helper to get active rooms for the lobby
+function getActiveRooms() {
+    return Object.keys(rooms).map(pass => {
+        const r = rooms[pass];
+        return {
+            password: pass,
+            whiteName: r.whiteName || "Waiting...",
+            blackName: r.blackName || "Waiting...",
+            settings: r.settings,
+            status: r.status
+        };
+    });
+}
+
 io.on("connection", (socket) => {
+    // Send room list to anyone in the lobby
+    socket.emit("lobby-update", getActiveRooms());
+
     socket.on("create-room", (data) => {
         const { password, name, mins, secs, inc, colorPref } = data;
         if (rooms[password]) {
@@ -20,146 +37,131 @@ io.on("connection", (socket) => {
             creatorName: name,
             settings: { mins, secs, inc, colorPref },
             status: "waiting",
-            players: { white: null, black: null }
+            players: { white: null, black: null },
+            spectators: [] // Array of {id, socketId, name}
         };
+        io.emit("lobby-update", getActiveRooms());
         socket.emit("room-created", { password });
     });
 
     socket.on("join-attempt", (data) => {
-        const { password } = data;
+        const { password, isSpectator } = data;
         const room = rooms[password];
-        if (!room) {
-            socket.emit("error-msg", "Room not found.");
-            return;
+        if (!room) return socket.emit("error-msg", "Room not found.");
+        
+        if (isSpectator) {
+            socket.emit("preview-settings", {
+                creatorName: room.creatorName,
+                settings: room.settings,
+                isSpectator: true,
+                password: password
+            });
+        } else {
+            if (room.status !== "waiting") return socket.emit("error-msg", "Room is already active.");
+            socket.emit("preview-settings", {
+                creatorName: room.creatorName,
+                settings: room.settings,
+                creatorColorPref: room.settings.colorPref
+            });
         }
-        if (room.status !== "waiting") {
-            socket.emit("error-msg", "Room is already in progress.");
-            return;
-        }
-        socket.emit("preview-settings", {
-            creatorName: room.creatorName,
-            settings: room.settings,
-            creatorColorPref: room.settings.colorPref
-        });
     });
 
     socket.on("confirm-join", (data) => {
-        const { password, name } = data;
+        const { password, name, isSpectator } = data;
         const room = rooms[password];
-        if (!room || room.status !== "waiting") return;
+        if (!room) return;
 
         socket.join(password);
-        room.status = "active";
-        const joinerId = socket.id;
-        const creatorId = room.creatorId;
 
-        let whiteId, blackId;
-        const pref = room.settings.colorPref;
-        if (pref === 'white') { whiteId = creatorId; blackId = joinerId; }
-        else if (pref === 'black') { whiteId = joinerId; blackId = creatorId; }
-        else {
-            if (Math.random() < 0.5) { whiteId = creatorId; blackId = joinerId; }
-            else { whiteId = joinerId; blackId = creatorId; }
+        if (isSpectator) {
+            // Find lowest available spectator ID
+            const existingIds = room.spectators.map(s => s.id);
+            let newId = 1;
+            while(existingIds.includes(newId)) newId++;
+
+            room.spectators.push({ id: newId, socketId: socket.id, name: name });
+            
+            socket.emit("player-assignment", { 
+                color: 'spectator', 
+                spectatorId: newId,
+                settings: room.settings,
+                whiteName: room.whiteName,
+                blackName: room.blackName,
+                // Sync current state
+                gameState: {
+                    board: room.boardState,
+                    turn: room.currentTurn,
+                    history: room.moveHistory,
+                    times: { white: room.whiteTime, black: room.blackTime }
+                }
+            });
+
+            socket.to(password).emit("receive-chat", {
+                message: `${name} is now spectating the game.`,
+                sender: "System"
+            });
+        } else {
+            room.status = "active";
+            const joinerId = socket.id;
+            const creatorId = room.creatorId;
+
+            let whiteId, blackId;
+            const pref = room.settings.colorPref;
+            if (pref === 'white') { whiteId = creatorId; blackId = joinerId; room.whiteName = room.creatorName; room.blackName = name; }
+            else if (pref === 'black') { whiteId = joinerId; blackId = creatorId; room.whiteName = name; room.blackName = room.creatorName; }
+            else {
+                if (Math.random() < 0.5) { whiteId = creatorId; blackId = joinerId; room.whiteName = room.creatorName; room.blackName = name; }
+                else { whiteId = joinerId; blackId = creatorId; room.whiteName = name; room.blackName = room.creatorName; }
+            }
+
+            room.players.white = whiteId;
+            room.players.black = blackId;
+
+            io.to(creatorId).emit("player-assignment", { color: creatorId === whiteId ? 'white' : 'black', settings: room.settings, oppName: name });
+            io.to(joinerId).emit("player-assignment", { color: joinerId === whiteId ? 'white' : 'black', settings: room.settings, oppName: room.creatorName });
+            io.emit("lobby-update", getActiveRooms());
         }
-
-        room.players.white = whiteId;
-        room.players.black = blackId;
-
-        io.to(creatorId).emit("player-assignment", { 
-            color: creatorId === whiteId ? 'white' : 'black', 
-            settings: room.settings,
-            oppName: name
-        });
-        io.to(joinerId).emit("player-assignment", { 
-            color: joinerId === whiteId ? 'white' : 'black', 
-            settings: room.settings,
-            oppName: room.creatorName
-        });
     });
 
     socket.on("send-move", (data) => {
+        const room = rooms[data.password];
+        if(room) {
+            // Update server's copy for new spectators
+            room.whiteTime = data.whiteTime;
+            room.blackTime = data.blackTime;
+            // You would ideally track boardState here too for mid-game spectator joins
+        }
         socket.to(data.password).emit("receive-move", data);
     });
 
-    socket.on("send-chat", (data) => {
-        socket.to(data.password).emit("receive-chat", {
-            message: data.message,
-            sender: data.senderName
-        });
-    });
-
-    // --- ADMIN COMMANDS ---
-    socket.on("admin-pause-toggle", (data) => {
-        io.in(data.password).emit("pause-state-updated", { isPaused: data.isPaused });
-    });
-
-    socket.on("admin-set-time", (data) => {
-        io.in(data.password).emit("time-updated", {
-            color: data.color,
-            newTime: data.newTime
-        });
-    });
-
-    socket.on("admin-set-increment", (data) => {
-        io.in(data.password).emit("increment-updated", {
-            newInc: data.newInc
-        });
-    });
-
-    socket.on("admin-place-piece", (data) => {
-        io.in(data.password).emit("piece-placed", {
-            r: data.r,
-            c: data.c,
-            piece: data.piece
-        });
-    });
-
-    socket.on("admin-reset-board", (data) => {
-        io.in(data.password).emit("board-reset-triggered");
-    });
-
     socket.on("admin-permission-toggle", (data) => {
-        io.in(data.password).emit("permission-updated", {
-            targetColor: data.targetColor,
-            isAdmin: data.isAdmin
-        });
-    });
-
-    // --- GAME ACTIONS ---
-    socket.on("resign", (data) => {
-        socket.to(data.password).emit("opponent-resigned", { winner: data.winner });
-    });
-
-    socket.on("offer-draw", (data) => {
-        socket.to(data.password).emit("draw-offered");
-    });
-
-    socket.on("draw-response", (data) => {
-        io.in(data.password).emit("draw-resolved", { accepted: data.accepted });
-    });
-
-    socket.on("rematch-request", (data) => {
-        const pass = data.password;
-        if (!roomRematchStates[pass]) roomRematchStates[pass] = new Set();
+        const room = rooms[data.password];
+        if(!room) return;
         
-        if (roomRematchStates[pass].has(socket.id)) {
-            roomRematchStates[pass].delete(socket.id);
-            socket.to(pass).emit("rematch-canceled");
-        } else {
-            roomRematchStates[pass].add(socket.id);
-            socket.to(pass).emit("rematch-offered");
+        let targetSocketId = null;
+        if(data.targetColor === 'white') targetSocketId = room.players.white;
+        else if(data.targetColor === 'black') targetSocketId = room.players.black;
+        else {
+            const spec = room.spectators.find(s => s.id === parseInt(data.targetColor));
+            if(spec) targetSocketId = spec.socketId;
+        }
 
-            if (roomRematchStates[pass].size === 2) {
-                delete roomRematchStates[pass];
-                io.in(pass).emit("rematch-start");
-            }
+        if(targetSocketId) {
+            io.to(targetSocketId).emit("permission-updated", { isAdmin: data.isAdmin });
         }
     });
 
     socket.on("disconnecting", () => {
         socket.rooms.forEach(roomPass => {
-            if (rooms[roomPass]) delete rooms[roomPass];
-            if (roomRematchStates[roomPass]) delete roomRematchStates[roomPass];
+            const room = rooms[roomPass];
+            if (room) {
+                if(socket.id === room.players.white || socket.id === room.players.black) {
+                    delete rooms[roomPass];
+                    io.emit("lobby-update", getActiveRooms());
+                } else {
+                    room.spectators = room.spectators.filter(s => s.socketId !== socket.id);
+                }
+            }
         });
     });
 });

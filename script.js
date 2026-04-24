@@ -307,7 +307,7 @@ function appendChatMessage(sender, message, isSystem = false) {
     msgContainer.scrollTop = msgContainer.scrollHeight;
 }
 
-function sendChatMessage() {␊
+function sendChatMessage() {
     const input = document.getElementById('chat-input');
     const msg = input.value.trim();
     if (!msg || !currentPassword) return;
@@ -319,10 +319,10 @@ function sendChatMessage() {␊
     }
 
     const myName = isSpectator ? `${spectatorName} (spectator)` : (myColor === 'white' ? whiteName : blackName);
-    socket.emit("send-chat", { password: currentPassword, message: msg, senderName: myName });␊
-    appendChatMessage("You", msg);␊
-    input.value = '';␊
-}␊
+    socket.emit("send-chat", { password: currentPassword, message: msg, senderName: myName });
+    appendChatMessage("You", msg);
+    input.value = '';
+}
 
 const COMMANDS_HELP = {
     "pause": { desc: "Pauses or resumes the game clocks.", usage: "/pause <true/false>" },
@@ -404,7 +404,21 @@ function handleAdminCommand(cmd) {
     }
     else if (baseCmd === "increment") {
         const newInc = parseInt(args[1]);
-@@ -305,60 +422,70 @@ function handleAdminCommand(cmd) {
+        if (!isNaN(newInc)) {
+            socket.emit("admin-set-increment", {
+                password: currentPassword,
+                newInc: newInc
+            });
+        } else {
+            appendChatMessage("Console", `Usage: ${COMMANDS_HELP.increment.usage}`, true);
+        }
+    }
+    else if (baseCmd === "reset") {
+        socket.emit("admin-reset-board", { password: currentPassword });
+    }
+    else if (baseCmd === "place") {
+        const sqName = args[1]?.toLowerCase();
+        const color = args[2]?.toLowerCase();
         const pieceType = args[3]?.toLowerCase();
 
         const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
@@ -475,7 +489,124 @@ function canAttackSquare(fromR, fromC, toR, toC, piece, board) {
     const team = getTeam(piece);
     const clearPath = (r1, c1, r2, c2) => {
         const stepR = r2 === r1 ? 0 : (r2 - r1) / Math.abs(r2 - r1);
-@@ -483,284 +610,357 @@ function handleActualMove(from, to, isLocal) {
+        const stepC = c2 === c1 ? 0 : (c2 - c1) / Math.abs(c2 - c1);
+        let currR = r1 + stepR; let currC = c1 + stepC;
+        while (currR !== r2 || currC !== c2) {
+            if (board[currR][currC] !== '') return false;
+            currR += stepR; currC += stepC;
+        }
+        return true;
+    };
+    if (piece === '♙' || piece === '♟') {
+        const dir = team === 'white' ? -1 : 1;
+        return adc === 1 && dr === dir;
+    }
+    if (piece === '♖' || piece === '♜') return (dr === 0 || dc === 0) && clearPath(fromR, fromC, toR, toC);
+    if (piece === '♘' || piece === '♞') return (adr === 2 && adc === 1) || (adr === 1 && adc === 2);
+    if (piece === '♗' || piece === '♝') return adr === adc && clearPath(fromR, fromC, toR, toC);
+    if (piece === '♕' || piece === '♛') return (adr === adc || dr === 0 || dc === 0) && clearPath(fromR, fromC, toR, toC);
+    if (piece === '♔' || piece === '♚') return adr <= 1 && adc <= 1;
+    return false;
+}
+
+function canMoveTo(fromR, fromC, toR, toC, piece, board) {
+    const dr = toR - fromR; const dc = toC - fromC;
+    const adr = Math.abs(dr); const adc = Math.abs(dc);
+    const team = getTeam(piece); const target = board[toR][toC];
+    if (target !== '' && getTeam(target) === team) return false;
+    const clearPath = (r1, c1, r2, c2) => {
+        const stepR = r2 === r1 ? 0 : (r2 - r1) / Math.abs(r2 - r1);
+        const stepC = c2 === c1 ? 0 : (c2 - c1) / Math.abs(c2 - c1);
+        let currR = r1 + stepR; let currC = c1 + stepC;
+        while (currR !== r2 || currC !== c2) {
+            if (board[currR][currC] !== '') return false;
+            currR += stepR; currC += stepC;
+        }
+        return true;
+    };
+    if (piece === '♙' || piece === '♟') {
+        const dir = team === 'white' ? -1 : 1;
+        if (dc === 0 && target === '') {
+            if (dr === dir) return true;
+            if (dr === 2 * dir && fromR === (team === 'white' ? 6 : 1) && board[fromR + dir][fromC] === '') return true;
+        }
+        if (adc === 1 && dr === dir) {
+            if (target !== '') return true;
+            if (enPassantTarget && enPassantTarget.r === toR && enPassantTarget.c === toC) return true;
+        }
+        return false;
+    }
+    if ((piece === '♔' || piece === '♚') && adc === 2) {
+        if (hasMoved[`${fromR},${fromC}`]) return false;
+        if (isSquareAttacked(fromR, fromC, team === 'white' ? 'black' : 'white', board)) return false;
+        const rookCol = toC === 6 ? 7 : 0;
+        if (board[fromR][rookCol] === '' || hasMoved[`${fromR},${rookCol}`]) return false;
+        return clearPath(fromR, fromC, fromR, rookCol);
+    }
+    return canAttackSquare(fromR, fromC, toR, toC, piece, board);
+}
+
+function isSquareAttacked(r, c, attackerTeam, board) {
+    for (let i = 0; i < 8; i++) {
+        for (let j = 0; j < 8; j++) {
+            const piece = board[i][j];
+            if (piece !== '' && getTeam(piece) === attackerTeam) {
+                if (canAttackSquare(i, j, r, c, piece, board)) return true;
+            }
+        }
+    }
+    return false;
+}
+
+function getKingPos(team, board) {
+    const king = team === 'white' ? '♔' : '♚';
+    for (let r = 0; r < 8; r++) { for (let c = 0; c < 8; c++) { if (board[r][c] === king) return { r, c }; } }
+    return null;
+}
+
+function isTeamInCheck(team, board) {
+    const pos = getKingPos(team, board);
+    if (!pos) return false;
+    return isSquareAttacked(pos.r, pos.c, team === 'white' ? 'black' : 'white', board);
+}
+
+function isMoveLegal(fromR, fromC, toR, toC, team) {
+    const piece = boardState[fromR][fromC];
+    if (!canMoveTo(fromR, fromC, toR, toC, piece, boardState)) return false;
+    const nextBoard = boardState.map(row => [...row]);
+    nextBoard[toR][toC] = piece;
+    nextBoard[fromR][fromC] = '';
+    if ((piece === '♙' || piece === '♟') && enPassantTarget && enPassantTarget.r === toR && enPassantTarget.c === toC) nextBoard[fromR][toC] = '';
+    return !isTeamInCheck(team, nextBoard);
+}
+
+function getLegalMoves(team) {
+    let moves = [];
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            if (getTeam(boardState[r][c]) === team) {
+                for (let tr = 0; tr < 8; tr++) {
+                    for (let tc = 0; tc < 8; tc++) {
+                        if (isMoveLegal(r, c, tr, tc, team)) moves.push({ from: { r, c }, to: { r: tr, c: tc } });
+                    }
+                }
+            }
+        }
+    }
+    return moves;
+}
+
+function handleActualMove(from, to, isLocal) {
+    if (isGameOver) return;
+    const movingPiece = boardState[from.r][from.c];
+    const targetPiece = boardState[to.r][to.c];
+    const team = currentTurn;
+    const isEP = (movingPiece === '♙' || movingPiece === '♟') && enPassantTarget && enPassantTarget.r === to.r && enPassantTarget.c === to.c;
+    let castleType = null;
+    if ((movingPiece === '♔' || movingPiece === '♚') && Math.abs(from.c - to.c) === 2) {
+        castleType = from.c < to.c ? 'short' : 'long';
+        const rookOldCol = to.c === 6 ? 7 : 0; const rookNewCol = to.c === 6 ? 5 : 3;
+        boardState[to.r][rookNewCol] = boardState[to.r][rookOldCol]; boardState[to.r][rookOldCol] = '';
     }
     let notation = getNotation(from.r, from.c, to.r, to.c, movingPiece, targetPiece, isEP, castleType);
     if (isEP) boardState[from.r][to.c] = '';
@@ -501,7 +632,7 @@ function canAttackSquare(fromR, fromC, toR, toC, piece, board) {
     render(forcedStatus);
 }
 
-function render(forcedStatus) {␊
+function render(forcedStatus) {
     const layout = document.getElementById('main-layout'); 
     if (!layout) return;
 
@@ -564,7 +695,7 @@ function render(forcedStatus) {␊
                 const span = document.createElement('span'); span.className = `piece ${isWhite(boardState[r][c]) ? 'w-piece' : 'b-piece'}`;
                 span.textContent = boardState[r][c]; sq.appendChild(span);
             }
-            sq.onclick = () => {␊
+            sq.onclick = () => {
                 if (isSpectator || isGameOver || currentTurn !== myColor) return;
                 if (selected) {
                     if (hints.some(h => h.r === r && h.c === c)) {
@@ -641,7 +772,7 @@ function startTimer() {
     }, 1000);
 }
 
-function initGameState() {␊
+function initGameState() {
     boardState = [
         ['♜', '♞', '♝', '♛', '♚', '♝', '♞', '♜'], ['♟', '♟', '♟', '♟', '♟', '♟', '♟', '♟'],
         ['', '', '', '', '', '', '', ''], ['', '', '', '', '', '', '', ''],
@@ -702,13 +833,13 @@ function switchTab(tab) {
     document.getElementById('tab-join').className = tab === 'join' ? 'active' : '';
 }
 
-function createRoom() {␊
+function createRoom() {
     currentPassword = document.getElementById('roomPass').value; tempName = document.getElementById('uName').value;
     if (!currentPassword) return alert("Enter password.");
     socket.emit("create-room", { password: currentPassword, name: tempName, mins: document.getElementById('tMin').value, secs: document.getElementById('tSec').value, inc: document.getElementById('tInc').value, colorPref: document.getElementById('colorPref').value });
-}␊
+}
 
-function joinRoom() {␊
+function joinRoom() {
     currentPassword = document.getElementById('joinPass').value; tempName = document.getElementById('joinName').value;
     if (!currentPassword) return alert("Enter password.");
     socket.emit("join-attempt", { password: currentPassword });

@@ -113,6 +113,24 @@ socket.on("piece-placed", (data) => {
     render();
 });
 
+socket.on("board-reset-triggered", () => {
+    boardState = [
+        ['♜', '♞', '♝', '♛', '♚', '♝', '♞', '♜'], 
+        ['♟', '♟', '♟', '♟', '♟', '♟', '♟', '♟'],
+        ['', '', '', '', '', '', '', ''], 
+        ['', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', ''], 
+        ['', '', '', '', '', '', '', ''],
+        ['♙', '♙', '♙', '♙', '♙', '♙', '♙', '♙'], 
+        ['♖', '♘', '♗', '♕', '♔', '♗', '♘', '♖']
+    ];
+    enPassantTarget = null;
+    selected = null;
+    hasMoved = {}; 
+    appendChatMessage("Console", "Board reset to starting position by Admin", true);
+    render();
+});
+
 socket.on("opponent-resigned", (data) => {
     const status = `${data.winner.toUpperCase()} WINS BY RESIGNATION`;
     isGameOver = true;
@@ -199,6 +217,7 @@ const COMMANDS_HELP = {
     "time": { desc: "Sets the remaining time for a specific player.", usage: "/time <white/black> <minutes> <seconds>" },
     "place": { desc: "Replaces a square's content.", usage: "/place <square> <white/black/empty> <piece (if not empty)>" },
     "increment": { desc: "Changes the bonus seconds added after each move.", usage: "/increment <seconds>" },
+    "reset": { desc: "Resets pieces to starting position (keeps time/turn).", usage: "/reset" },
     "help": { desc: "Lists all commands or shows usage for one.", usage: "/help <command name (optional)>" }
 };
 
@@ -249,6 +268,9 @@ function handleAdminCommand(cmd) {
         } else {
             appendChatMessage("Console", `Usage: ${COMMANDS_HELP.increment.usage}`, true);
         }
+    }
+    else if (baseCmd === "reset") {
+        socket.emit("admin-reset-board", { password: currentPassword });
     }
     else if (baseCmd === "place") {
         const sqName = args[1]?.toLowerCase();
@@ -460,7 +482,6 @@ function render(forcedStatus) {
     const layout = document.getElementById('main-layout'); 
     if (!layout) return;
 
-    // --- CHAT INITIALIZATION (Only happens once) ---
     if (!document.getElementById('chat-panel')) {
         const chatPanel = document.createElement('div');
         chatPanel.id = 'chat-panel';
@@ -479,8 +500,6 @@ function render(forcedStatus) {
         layout.appendChild(chatPanel);
     }
 
-    // --- CLEAN RE-RENDER FOR GAME AREA & SIDE PANEL ---
-    // Remove old versions of board and sidebar to prevent duplicates
     const oldGame = document.getElementById('game-area');
     const oldSide = document.getElementById('side-panel');
     if(oldGame) oldGame.remove();

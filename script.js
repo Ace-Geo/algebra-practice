@@ -114,7 +114,7 @@ socket.on("preview-settings", (data) => {
 socket.on("receive-move", (data) => {
     whiteTime = data.whiteTime;
     blackTime = data.blackTime;
-    handleActualMove(data.move.from, data.move.to, false);
+    handleActualMove(data.move.from, data.move.to, false, data.move.promotion || null);
 });
 
 socket.on("receive-chat", (data) => {
@@ -629,7 +629,7 @@ function getLegalMoves(team) {
     return moves;
 }
 
-function handleActualMove(from, to, isLocal) {
+function handleActualMove(from, to, isLocal, promotionChoice = null) {
     if (isGameOver) return;
     const movingPiece = boardState[from.r][from.c];
     const targetPiece = boardState[to.r][to.c];
@@ -645,8 +645,15 @@ function handleActualMove(from, to, isLocal) {
     if (isEP) boardState[from.r][to.c] = '';
     hasMoved[`${from.r},${from.c}`] = true;
     boardState[to.r][to.c] = movingPiece; boardState[from.r][from.c] = '';
-    if (movingPiece === '♙' && to.r === 0) boardState[to.r][to.c] = '♕';
-    if (movingPiece === '♟' && to.r === 7) boardState[to.r][to.c] = '♛';
+    let promotedTo = null;
+    if (movingPiece === '♙' && to.r === 0) {
+        promotedTo = promotionChoice || '♕';
+        boardState[to.r][to.c] = promotedTo;
+    }
+    if (movingPiece === '♟' && to.r === 7) {
+        promotedTo = promotionChoice || '♛';
+        boardState[to.r][to.c] = promotedTo;
+    }
     if (!isInfinite && isLocal) { if (team === 'white') whiteTime += increment; else blackTime += increment; }
     enPassantTarget = (movingPiece === '♙' || movingPiece === '♟') && Math.abs(from.r - to.r) === 2 ? { r: (from.r + to.r) / 2, c: to.c } : null;
     currentTurn = (team === 'white' ? 'black' : 'white');
@@ -661,7 +668,7 @@ function handleActualMove(from, to, isLocal) {
     if (team === 'white') moveHistory.push({ w: notation, b: '' });
     else if (moveHistory.length > 0) moveHistory[moveHistory.length - 1].b = notation;
     selected = null;
-    if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to }, whiteTime, blackTime });
+    if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
     render(forcedStatus);
 }
 
@@ -728,11 +735,16 @@ function render(forcedStatus) {
                 const span = document.createElement('span'); span.className = `piece ${isWhite(boardState[r][c]) ? 'w-piece' : 'b-piece'}`;
                 span.textContent = boardState[r][c]; sq.appendChild(span);
             }
-            sq.onclick = () => {
+            sq.onclick = async () => {
                 if (isSpectator || isGameOver || currentTurn !== myColor) return;
                 if (selected) {
                     if (hints.some(h => h.r === r && h.c === c)) {
-                        handleActualMove(selected, { r, c }, true);
+                        const piece = boardState[selected.r][selected.c];
+                        const team = getTeam(piece);
+                        let promotionChoice = null;
+                        const isPromotionMove = (piece === '♙' && team === 'white' && r === 0) || (piece === '♟' && team === 'black' && r === 7);
+                        if (isPromotionMove) promotionChoice = await choosePromotionPiece(team);
+                        handleActualMove(selected, { r, c }, true, promotionChoice);
                     } else if (getTeam(boardState[r][c]) === currentTurn) {
                         selected = (selected.r === r && selected.c === c) ? null : { r, c };
                         render();
@@ -762,12 +774,12 @@ function render(forcedStatus) {
         <div id="notification-area"></div>
         <div class="btn-row">
             ${isSpectator
-                ? `<button class="action-btn" onclick="flipBoard()">Flip Board</button>
-                   <button class="action-btn" onclick="returnToLobby()">Return to Lobby</button>`
-                : `<button class="action-btn" onclick="offerDraw()" ${isGameOver ? 'disabled' : ''}>Offer Draw</button>
-                   <button class="action-btn" onclick="resignGame()" ${isGameOver ? 'disabled' : ''}>Resign</button>`}
+                ? `<button class="action-btn" onclick="flipBoard()">🔄 Flip Board</button>
+                   <button class="action-btn" onclick="returnToLobby()">🏠 Return</button>`
+                : `<button class="action-btn" onclick="offerDraw()" ${isGameOver ? 'disabled' : ''}>🤝 Offer Draw</button>
+                   <button class="action-btn" onclick="resignGame()" ${isGameOver ? 'disabled' : ''}>🏳️ Resign</button>`}
         </div>
-        <button class="action-btn" style="width:100%;" onclick="showRulesPopup()">Game Rules</button>
+        <button class="action-btn" style="width:100%;" onclick="showRulesPopup()">📘 Game Rules</button>
         <div id="history-container"></div>
     `;
     const hist = sidePanel.querySelector('#history-container');
@@ -843,9 +855,9 @@ function renderSetupCard() {
         content.innerHTML = `
             <h1 style="color:#779556; margin-top:0;">Algebra Practice</h1>
             <p style="color:#bababa; margin-bottom:20px;">Choose an option</p>
-            <button class="start-btn" onclick="setSetupView('create')">Create New Game</button>
-            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('join')">Join Game</button>
-            <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showRulesPopup()">Game Rules</button>
+            <button class="start-btn" onclick="setSetupView('create')">➕ Create New Game</button>
+            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('join')">🎯 Join Game</button>
+            <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showRulesPopup()">📘 Game Rules</button>
             ${lobbySpectateEnabled ? '<button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="openSpectateMenu()">Spectate Games</button>' : ''}
         `;
         return;
@@ -858,8 +870,8 @@ function renderSetupCard() {
             <div class="input-group"><label>Your Name</label><input id="uName" value="Player 1"></div>
             <div class="input-group"><label>Time Control</label><div style="display:flex; gap:5px;"><input type="number" id="tMin" value="10"><input type="number" id="tSec" value="0"><input type="number" id="tInc" value="0"></div></div>
             <div class="input-group"><label>Play As</label><select id="colorPref"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
-            <button class="start-btn" onclick="createRoom()">CREATE</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('menu')">Return to Menu</button>
+            <button class="start-btn" onclick="createRoom()">🚀 CREATE</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('menu')">⬅ Return to Menu</button>
         `;
         return;
     }
@@ -869,8 +881,8 @@ function renderSetupCard() {
             <h2 style="color:#779556; margin-top:0;">Join Game</h2>
             <div class="input-group"><label>Room Password</label><input id="joinPass" placeholder="Enter Password"></div>
             <div class="input-group"><label>Your Name</label><input id="joinName" value="Player 2"></div>
-            <button class="start-btn" onclick="joinRoom()">FIND ROOM</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('menu')">Return to Menu</button>
+            <button class="start-btn" onclick="joinRoom()">🔎 FIND ROOM</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('menu')">⬅ Return to Menu</button>
         `;
     }
 }
@@ -900,7 +912,7 @@ function openSpectateMenu() {
     content.innerHTML = `
         <h2 style="color: #779556">Active Games</h2>
         <div id="spectate-games-list" style="max-height: 320px; overflow-y: auto; text-align: left;"></div>
-        <button class="action-btn" style="margin-top: 10px; width: 100%;" onclick="setSetupView('menu')">Back</button>
+        <button class="action-btn" style="margin-top: 10px; width: 100%;" onclick="setSetupView('menu')">⬅ Back</button>
     `;
     socket.emit("list-active-games");
 }
@@ -918,7 +930,7 @@ function renderSpectateList() {
             <div><b>White:</b> ${game.whiteName}</div>
             <div><b>Black:</b> ${game.blackName}</div>
             <div><b>Time:</b> ${game.settings.mins}m ${game.settings.secs}s + ${game.settings.inc}s</div>
-            <button class="start-btn" style="margin-top:10px;" onclick="spectateRoom('${game.password}')">Spectate</button>
+            <button class="start-btn" style="margin-top:10px;" onclick="spectateRoom('${game.password}')">👀 Spectate</button>
         </div>
     `).join('');
 }
@@ -961,6 +973,45 @@ function showStatusMessage(msg) {
     const area = document.getElementById('notification-area');
     area.innerHTML = `<div style="background:#4b4845; padding:10px; border-radius:4px; font-size:12px; text-align:center;">${msg}</div>`;
     setTimeout(() => { area.innerHTML = ''; }, 3000);
+}
+
+function choosePromotionPiece(team) {
+    return new Promise((resolve) => {
+        const existing = document.getElementById('promotion-overlay');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'promotion-overlay';
+        overlay.style.position = 'fixed';
+        overlay.style.inset = '0';
+        overlay.style.background = 'rgba(0,0,0,0.8)';
+        overlay.style.display = 'flex';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.zIndex = '2600';
+
+        const pieces = team === 'white'
+            ? [{ icon: '♕', name: 'Queen' }, { icon: '♖', name: 'Rook' }, { icon: '♗', name: 'Bishop' }, { icon: '♘', name: 'Knight' }]
+            : [{ icon: '♛', name: 'Queen' }, { icon: '♜', name: 'Rook' }, { icon: '♝', name: 'Bishop' }, { icon: '♞', name: 'Knight' }];
+
+        overlay.innerHTML = `
+            <div class="result-card" style="width:360px;">
+                <h2>Choose Promotion</h2>
+                <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:10px; margin-top:15px;">
+                    ${pieces.map(p => `<button class="action-btn promotion-choice" data-piece="${p.icon}" style="padding:14px; font-size:16px;">${p.icon} ${p.name}</button>`).join('')}
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+        overlay.querySelectorAll('.promotion-choice').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const chosen = btn.getAttribute('data-piece');
+                overlay.remove();
+                resolve(chosen);
+            });
+        });
+    });
 }
 
 function showRulesPopup() {

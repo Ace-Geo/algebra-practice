@@ -28,6 +28,7 @@ let increment;
 let moveHistory = [];
 let rematchRequested = false;
 let gameSettings = null;
+let positionCounts = {};
 
 // --- ADMIN & COMMAND STATE ---
 let isAdmin = false;
@@ -158,7 +159,8 @@ socket.on("spectator-sync-needed", (data) => {
             whiteTime,
             blackTime,
             increment,
-            moveHistory
+            moveHistory,
+            positionCounts
         }
     });
 });
@@ -177,6 +179,7 @@ socket.on("spectator-state-sync", (data) => {
     blackTime = data.state.blackTime;
     increment = data.state.increment;
     moveHistory = data.state.moveHistory || [];
+    positionCounts = data.state.positionCounts || {};
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     if (!isInfinite) startTimer();
     render();
@@ -205,6 +208,7 @@ socket.on("increment-updated", (data) => {
 
 socket.on("piece-placed", (data) => {
     boardState[data.r][data.c] = data.piece;
+    resetPositionTracking();
     appendChatMessage("Console", "Board modified by Admin", true);
     render();
 });
@@ -222,7 +226,8 @@ socket.on("board-reset-triggered", () => {
     ];
     enPassantTarget = null;
     selected = null;
-    hasMoved = {}; 
+    hasMoved = {};
+    resetPositionTracking();
     appendChatMessage("Console", "Board reset to starting position by Admin", true);
     render();
 });
@@ -629,6 +634,28 @@ function getLegalMoves(team) {
     return moves;
 }
 
+function getCastlingRights() {
+    const whiteKingMoved = !!hasMoved['7,4'];
+    const blackKingMoved = !!hasMoved['0,4'];
+    const wShort = !whiteKingMoved && !hasMoved['7,7'] && boardState[7][4] === '♔' && boardState[7][7] === '♖';
+    const wLong = !whiteKingMoved && !hasMoved['7,0'] && boardState[7][4] === '♔' && boardState[7][0] === '♖';
+    const bShort = !blackKingMoved && !hasMoved['0,7'] && boardState[0][4] === '♚' && boardState[0][7] === '♜';
+    const bLong = !blackKingMoved && !hasMoved['0,0'] && boardState[0][4] === '♚' && boardState[0][0] === '♜';
+    return `${wShort ? 'K' : ''}${wLong ? 'Q' : ''}${bShort ? 'k' : ''}${bLong ? 'q' : ''}` || '-';
+}
+
+function getPositionKey() {
+    const boardKey = boardState.map((row) => row.map((p) => p || '.').join('')).join('/');
+    const ep = enPassantTarget ? `${enPassantTarget.r},${enPassantTarget.c}` : '-';
+    return `${boardKey}|${currentTurn}|${getCastlingRights()}|${ep}`;
+}
+
+function resetPositionTracking() {
+    positionCounts = {};
+    const key = getPositionKey();
+    positionCounts[key] = 1;
+}
+
 function handleActualMove(from, to, isLocal, promotionChoice = null) {
     if (isGameOver) return;
     const movingPiece = boardState[from.r][from.c];
@@ -657,9 +684,16 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
     if (!isInfinite && isLocal) { if (team === 'white') whiteTime += increment; else blackTime += increment; }
     enPassantTarget = (movingPiece === '♙' || movingPiece === '♟') && Math.abs(from.r - to.r) === 2 ? { r: (from.r + to.r) / 2, c: to.c } : null;
     currentTurn = (team === 'white' ? 'black' : 'white');
+    const positionKey = getPositionKey();
+    positionCounts[positionKey] = (positionCounts[positionKey] || 0) + 1;
     const nextMoves = getLegalMoves(currentTurn); const inCheck = isTeamInCheck(currentTurn, boardState);
     let forcedStatus = null;
-    if (nextMoves.length === 0) {
+    if (positionCounts[positionKey] >= 3) {
+        isGameOver = true;
+        if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
+        forcedStatus = "DRAW BY THREEFOLD REPETITION";
+        showResultModal(forcedStatus);
+    } else if (nextMoves.length === 0) {
         isGameOver = true; if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
         if (inCheck) { notation += '#'; forcedStatus = `CHECKMATE! ${team.toUpperCase()} WINS`; }
         else forcedStatus = "DRAW BY STALEMATE";
@@ -774,12 +808,12 @@ function render(forcedStatus) {
         <div id="notification-area"></div>
         <div class="btn-row">
             ${isSpectator
-                ? `<button class="action-btn" onclick="flipBoard()">🔄 Flip Board</button>
-                   <button class="action-btn" onclick="returnToLobby()">🏠 Return</button>`
-                : `<button class="action-btn" onclick="offerDraw()" ${isGameOver ? 'disabled' : ''}>🤝 Offer Draw</button>
-                   <button class="action-btn" onclick="resignGame()" ${isGameOver ? 'disabled' : ''}>🏳️ Resign</button>`}
+                ? `<button class="action-btn" onclick="flipBoard()">Flip Board</button>
+                   <button class="action-btn" onclick="returnToLobby()">Return</button>`
+                : `<button class="action-btn" onclick="offerDraw()" ${isGameOver ? 'disabled' : ''}>Offer Draw</button>
+                   <button class="action-btn" onclick="resignGame()" ${isGameOver ? 'disabled' : ''}>Resign</button>`}
         </div>
-        <button class="action-btn" style="width:100%;" onclick="showRulesPopup()">📘 Game Rules</button>
+        <button class="action-btn" style="width:100%;" onclick="showRulesPopup()">Game Rules</button>
         <div id="history-container"></div>
     `;
     const hist = sidePanel.querySelector('#history-container');
@@ -832,6 +866,7 @@ function initGameState() {
         blackTime = whiteTime; increment = parseInt(gameSettings.inc) || 0;
         isInfinite = (whiteTime === 0);
     }
+    resetPositionTracking();
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     if (!isInfinite) startTimer();
     render();
@@ -855,9 +890,9 @@ function renderSetupCard() {
         content.innerHTML = `
             <h1 style="color:#779556; margin-top:0;">Algebra Practice</h1>
             <p style="color:#bababa; margin-bottom:20px;">Choose an option</p>
-            <button class="start-btn" onclick="setSetupView('create')">➕ Create New Game</button>
-            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('join')">🎯 Join Game</button>
-            <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showRulesPopup()">📘 Game Rules</button>
+            <button class="start-btn" onclick="setSetupView('create')">Create New Game</button>
+            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('join')">Join Game</button>
+            <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showRulesPopup()">Game Rules</button>
             ${lobbySpectateEnabled ? '<button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="openSpectateMenu()">Spectate Games</button>' : ''}
         `;
         return;
@@ -870,8 +905,8 @@ function renderSetupCard() {
             <div class="input-group"><label>Your Name</label><input id="uName" value="Player 1"></div>
             <div class="input-group"><label>Time Control</label><div style="display:flex; gap:5px;"><input type="number" id="tMin" value="10"><input type="number" id="tSec" value="0"><input type="number" id="tInc" value="0"></div></div>
             <div class="input-group"><label>Play As</label><select id="colorPref"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
-            <button class="start-btn" onclick="createRoom()">🚀 CREATE</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('menu')">⬅ Return to Menu</button>
+            <button class="start-btn" onclick="createRoom()">CREATE</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('menu')">Return to Menu</button>
         `;
         return;
     }
@@ -881,8 +916,8 @@ function renderSetupCard() {
             <h2 style="color:#779556; margin-top:0;">Join Game</h2>
             <div class="input-group"><label>Room Password</label><input id="joinPass" placeholder="Enter Password"></div>
             <div class="input-group"><label>Your Name</label><input id="joinName" value="Player 2"></div>
-            <button class="start-btn" onclick="joinRoom()">🔎 FIND ROOM</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('menu')">⬅ Return to Menu</button>
+            <button class="start-btn" onclick="joinRoom()">FIND ROOM</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('menu')">Return to Menu</button>
         `;
     }
 }
@@ -912,7 +947,7 @@ function openSpectateMenu() {
     content.innerHTML = `
         <h2 style="color: #779556">Active Games</h2>
         <div id="spectate-games-list" style="max-height: 320px; overflow-y: auto; text-align: left;"></div>
-        <button class="action-btn" style="margin-top: 10px; width: 100%;" onclick="setSetupView('menu')">⬅ Back</button>
+        <button class="action-btn" style="margin-top: 10px; width: 100%;" onclick="setSetupView('menu')">Back</button>
     `;
     socket.emit("list-active-games");
 }
@@ -930,7 +965,7 @@ function renderSpectateList() {
             <div><b>White:</b> ${game.whiteName}</div>
             <div><b>Black:</b> ${game.blackName}</div>
             <div><b>Time:</b> ${game.settings.mins}m ${game.settings.secs}s + ${game.settings.inc}s</div>
-            <button class="start-btn" style="margin-top:10px;" onclick="spectateRoom('${game.password}')">👀 Spectate</button>
+            <button class="start-btn" style="margin-top:10px;" onclick="spectateRoom('${game.password}')">Spectate</button>
         </div>
     `).join('');
 }

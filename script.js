@@ -29,6 +29,7 @@ let moveHistory = [];
 let rematchRequested = false;
 let gameSettings = null;
 let positionCounts = {};
+let halfmoveClock = 0;
 
 // --- ADMIN & COMMAND STATE ---
 let isAdmin = false;
@@ -160,7 +161,8 @@ socket.on("spectator-sync-needed", (data) => {
             blackTime,
             increment,
             moveHistory,
-            positionCounts
+            positionCounts,
+            halfmoveClock
         }
     });
 });
@@ -180,6 +182,7 @@ socket.on("spectator-state-sync", (data) => {
     increment = data.state.increment;
     moveHistory = data.state.moveHistory || [];
     positionCounts = data.state.positionCounts || {};
+    halfmoveClock = data.state.halfmoveClock || 0;
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     if (!isInfinite) startTimer();
     render();
@@ -209,6 +212,7 @@ socket.on("increment-updated", (data) => {
 socket.on("piece-placed", (data) => {
     boardState[data.r][data.c] = data.piece;
     resetPositionTracking();
+    halfmoveClock = 0;
     appendChatMessage("Console", "Board modified by Admin", true);
     render();
 });
@@ -228,6 +232,7 @@ socket.on("board-reset-triggered", () => {
     selected = null;
     hasMoved = {};
     resetPositionTracking();
+    halfmoveClock = 0;
     appendChatMessage("Console", "Board reset to starting position by Admin", true);
     render();
 });
@@ -656,6 +661,30 @@ function resetPositionTracking() {
     positionCounts[key] = 1;
 }
 
+function isInsufficientMaterial() {
+    const extras = [];
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            const piece = boardState[r][c];
+            if (!piece || piece === '♔' || piece === '♚') continue;
+            extras.push(piece);
+        }
+    }
+
+    if (extras.length === 0) return true; // K vs K
+
+    const isMinor = (p) => ['♗', '♘', '♝', '♞'].includes(p);
+    const hasMajorOrPawn = extras.some((p) => !isMinor(p));
+    if (hasMajorOrPawn) return false;
+
+    if (extras.length <= 2) return true; // K+minor vs K or K+minor vs K+minor
+
+    // K+NN vs K
+    if (extras.length === 2 && extras.every((p) => p === '♘' || p === '♞')) return true;
+
+    return false;
+}
+
 function handleActualMove(from, to, isLocal, promotionChoice = null) {
     if (isGameOver) return;
     const movingPiece = boardState[from.r][from.c];
@@ -681,6 +710,9 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
         promotedTo = promotionChoice || '♛';
         boardState[to.r][to.c] = promotedTo;
     }
+    const isPawnMove = movingPiece === '♙' || movingPiece === '♟';
+    const isCapture = targetPiece !== '' || isEP;
+    halfmoveClock = (isPawnMove || isCapture) ? 0 : (halfmoveClock + 1);
     if (!isInfinite && isLocal) { if (team === 'white') whiteTime += increment; else blackTime += increment; }
     enPassantTarget = (movingPiece === '♙' || movingPiece === '♟') && Math.abs(from.r - to.r) === 2 ? { r: (from.r + to.r) / 2, c: to.c } : null;
     currentTurn = (team === 'white' ? 'black' : 'white');
@@ -692,6 +724,16 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
         isGameOver = true;
         if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
         forcedStatus = "DRAW BY THREEFOLD REPETITION";
+        showResultModal(forcedStatus);
+    } else if (halfmoveClock >= 100) {
+        isGameOver = true;
+        if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
+        forcedStatus = "DRAW BY FIFTY-MOVE RULE";
+        showResultModal(forcedStatus);
+    } else if (isInsufficientMaterial()) {
+        isGameOver = true;
+        if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
+        forcedStatus = "DRAW BY INSUFFICIENT MATERIAL";
         showResultModal(forcedStatus);
     } else if (nextMoves.length === 0) {
         isGameOver = true; if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
@@ -860,6 +902,7 @@ function initGameState() {
         ['♙', '♙', '♙', '♙', '♙', '♙', '♙', '♙'], ['♖', '♘', '♗', '♕', '♔', '♗', '♘', '♖']
     ];
     currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false; selected = null; rematchRequested = false; isPaused = false;
+    halfmoveClock = 0;
     boardPerspective = isSpectator ? 'white' : myColor;
     if (gameSettings) {
         whiteTime = (parseInt(gameSettings.mins) * 60) + parseInt(gameSettings.secs);

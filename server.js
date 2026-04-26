@@ -109,7 +109,7 @@ io.on("connection", (socket) => {
         });
     });
 
-    socket.on("confirm-join", (data) => {␊
+    socket.on("confirm-join", (data) => {
         const { password, name } = data;
         const room = rooms[password];
         if (!room || room.status !== "waiting") return;
@@ -325,7 +325,6 @@ io.on("connection", (socket) => {
         });
     });
 
-    // --- ADMIN COMMANDS ---
     socket.on("admin-pause-toggle", (data) => {
         io.in(data.password).emit("pause-state-updated", { isPaused: data.isPaused });
     });
@@ -382,7 +381,6 @@ io.on("connection", (socket) => {
         });
     });
 
-    // --- GAME ACTIONS ---
     socket.on("resign", (data) => {
         socket.to(data.password).emit("opponent-resigned", { winner: data.winner });
     });
@@ -413,8 +411,8 @@ io.on("connection", (socket) => {
         }
     });
 
-    socket.on("disconnecting", () => {␊
-        Object.entries(rooms).forEach(([roomPass, room]) => {␊
+    socket.on("disconnecting", () => {
+        Object.entries(rooms).forEach(([roomPass, room]) => {
             if (room.spectators[socket.id]) {
                 delete room.spectators[socket.id];
                 emitSpectatorList(roomPass);

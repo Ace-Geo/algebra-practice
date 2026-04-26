@@ -1,4 +1,7 @@
-const socket = io("https://algebra-but-better.onrender.com");
+const socket = io("https://algebra-but-better.onrender.com", {
+    transports: ["websocket", "polling"],
+    rememberUpgrade: true
+});
 
 let myColor = null;
 let currentPassword = null;

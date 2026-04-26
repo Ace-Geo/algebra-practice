@@ -16,6 +16,8 @@ let lobbySpectateEnabled = false;
 let activeGames = [];
 let spectatorRoster = [];
 let setupView = "menu";
+let selectedGame = null;
+let coupLobby = null;
 
 let boardState;
 let currentTurn;
@@ -197,7 +199,7 @@ socket.on("pause-state-updated", (data) => {
     if (!isPaused && !isGameOver && !isInfinite) startTimer();
     const status = isPaused ? "Game Paused by Admin" : "Game Resumed by Admin";
     appendChatMessage("Console", status, true);
-    render(); 
+    render();
 });
 
 socket.on("time-updated", (data) => {
@@ -222,13 +224,13 @@ socket.on("piece-placed", (data) => {
 
 socket.on("board-reset-triggered", () => {
     boardState = [
-        ['♜', '♞', '♝', '♛', '♚', '♝', '♞', '♜'], 
+        ['♜', '♞', '♝', '♛', '♚', '♝', '♞', '♜'],
         ['♟', '♟', '♟', '♟', '♟', '♟', '♟', '♟'],
-        ['', '', '', '', '', '', '', ''], 
         ['', '', '', '', '', '', '', ''],
-        ['', '', '', '', '', '', '', ''], 
         ['', '', '', '', '', '', '', ''],
-        ['♙', '♙', '♙', '♙', '♙', '♙', '♙', '♙'], 
+        ['', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', ''],
+        ['♙', '♙', '♙', '♙', '♙', '♙', '♙', '♙'],
         ['♖', '♘', '♗', '♕', '♔', '♗', '♘', '♖']
     ];
     enPassantTarget = null;
@@ -323,6 +325,27 @@ socket.on("rematch-start", () => {
 
 socket.on("error-msg", (msg) => { alert(msg); });
 
+socket.on("coup-lobby-update", (data) => {
+    selectedGame = "coup";
+    setupView = "coup-lobby";
+    currentPassword = data.password;
+    coupLobby = data;
+    renderSetupCard();
+});
+
+socket.on("coup-kicked", () => {
+    alert("You were removed from the Coup room.");
+    selectedGame = "coup";
+    setupView = "coup-menu";
+    coupLobby = null;
+    currentPassword = null;
+    renderSetupCard();
+});
+
+socket.on("coup-start-placeholder", (data) => {
+    alert(data.message || "Coup gameplay is coming soon.");
+});
+
 function appendChatMessage(sender, message, isSystem = false) {
     const msgContainer = document.getElementById('chat-messages');
     if (!msgContainer) return;
@@ -402,7 +425,7 @@ function handleAdminCommand(cmd) {
                 appendChatMessage("Console", `/${key} - ${COMMANDS_HELP[key].desc}`, true);
             }
         }
-    } 
+    }
     else if (baseCmd === "admin") {
         const subAction = args[1]?.toLowerCase();
         if (subAction === "list") {
@@ -432,7 +455,7 @@ function handleAdminCommand(cmd) {
         } else {
             appendChatMessage("Console", `Command missing arguments. Usage: ${COMMANDS_HELP.pause.usage}`, true);
         }
-    } 
+    }
     else if (baseCmd === "time") {
         const targetColor = args[1]?.toLowerCase();
         const mins = parseInt(args[2]);
@@ -752,7 +775,7 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
 }
 
 function render(forcedStatus) {
-    const layout = document.getElementById('main-layout'); 
+    const layout = document.getElementById('main-layout');
     if (!layout) return;
 
     if (!document.getElementById('chat-panel')) {
@@ -791,16 +814,16 @@ function render(forcedStatus) {
     const topColor = boardPerspective === 'black' ? 'white' : 'black';
     const bottomColor = boardPerspective === 'black' ? 'black' : 'white';
     gameArea.appendChild(createPlayerBar(topColor === 'white' ? whiteName : blackName, topColor));
-    
+
     const boardCont = document.createElement('div');
     boardCont.id = 'board-container';
     const boardEl = document.createElement('div');
     boardEl.id = 'board';
-    
+
     const check = isTeamInCheck(currentTurn, boardState);
     let hints = (selected && !isGameOver) ? getLegalMoves(currentTurn).filter(m => m.from.r === selected.r && m.from.c === selected.c).map(m => m.to) : [];
     const range = (boardPerspective === 'black') ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
-    
+
     for (let r of range) {
         for (let c of range) {
             const sq = document.createElement('div'); sq.className = `square ${(r + c) % 2 === 0 ? 'white-sq' : 'black-sq'}`;
@@ -840,11 +863,11 @@ function render(forcedStatus) {
         }
     }
     boardCont.appendChild(boardEl); gameArea.appendChild(boardCont);
-    
+
     gameArea.appendChild(createPlayerBar(bottomColor === 'white' ? whiteName : blackName, bottomColor));
-    
+
     layout.appendChild(gameArea);
-    
+
     const sidePanel = document.createElement('div');
     sidePanel.id = 'side-panel';
     let statusDisplay = forcedStatus || (isGameOver ? "GAME OVER" : `${currentTurn.toUpperCase()}'S TURN ${check ? '(CHECK!)' : ''}`);
@@ -868,7 +891,7 @@ function render(forcedStatus) {
         hist.appendChild(row);
     });
     layout.appendChild(sidePanel);
-    
+
     updateTimerDisplay();
 }
 
@@ -932,19 +955,30 @@ function showSetup() {
 function renderSetupCard() {
     const content = document.getElementById('setup-card-content');
     if (!content) return;
-    if (setupView === "menu") {
+    if (setupView === "game-select") {
         content.innerHTML = `
-            <h1 style="color:#779556; margin-top:0;">Algebra Practice</h1>
-            <p style="color:#bababa; margin-bottom:20px;">Choose an option</p>
-            <button class="start-btn" onclick="setSetupView('create')">Create New Game</button>
-            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('join')">Join Game</button>
-            <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showRulesPopup()">Game Rules</button>
-            ${lobbySpectateEnabled ? '<button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="openSpectateMenu()">Spectate Games</button>' : ''}
+            <h1 style="color:#779556; margin-top:0;">Choose a Game</h1>
+            <p style="color:#bababa; margin-bottom:20px;">Select what you want to play.</p>
+            <button class="start-btn" onclick="setSetupView('chess-menu')">Play Chess</button>
+            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('coup-menu')">Play Coup</button>
         `;
         return;
     }
 
-    if (setupView === "create") {
+    if (setupView === "chess-menu") {
+        content.innerHTML = `
+            <h1 style="color:#779556; margin-top:0;">Chess</h1>
+            <p style="color:#bababa; margin-bottom:20px;">Choose an option</p>
+            <button class="start-btn" onclick="setSetupView('chess-create')">Create New Game</button>
+            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('chess-join')">Join Game</button>
+            <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showRulesPopup()">Game Rules</button>
+            ${lobbySpectateEnabled ? '<button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="openSpectateMenu()">Spectate Games</button>' : ''}
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('game-select')">Play a Different Game</button>
+        `;
+        return;
+    }
+
+    if (setupView === "chess-create") {
         content.innerHTML = `
             <h2 style="color:#779556; margin-top:0;">Create New Game</h2>
             <div class="input-group"><label>Room Password</label><input id="roomPass" placeholder="Secret Code"></div>
@@ -952,24 +986,92 @@ function renderSetupCard() {
             <div class="input-group"><label>Time Control</label><div style="display:flex; gap:5px;"><input type="number" id="tMin" value="10"><input type="number" id="tSec" value="0"><input type="number" id="tInc" value="0"></div></div>
             <div class="input-group"><label>Play As</label><select id="colorPref"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
             <button class="start-btn" onclick="createRoom()">CREATE</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('menu')">Return to Menu</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('chess-menu')">Return to Menu</button>
         `;
         return;
     }
 
-    if (setupView === "join") {
+    if (setupView === "chess-join") {
         content.innerHTML = `
             <h2 style="color:#779556; margin-top:0;">Join Game</h2>
             <div class="input-group"><label>Room Password</label><input id="joinPass" placeholder="Enter Password"></div>
             <div class="input-group"><label>Your Name</label><input id="joinName" value="Player 2"></div>
             <button class="start-btn" onclick="joinRoom()">FIND ROOM</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('menu')">Return to Menu</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('chess-menu')">Return to Menu</button>
+        `;
+        return;
+    }
+
+    if (setupView === "coup-menu") {
+        content.innerHTML = `
+            <h1 style="color:#779556; margin-top:0;">Coup</h1>
+            <p style="color:#bababa; margin-bottom:20px;">Choose an option</p>
+            <button class="start-btn" onclick="setSetupView('coup-create')">Create New Game</button>
+            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('coup-join')">Join Game</button>
+            <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showCoupRulesPopup()">Game Rules</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('game-select')">Play a Different Game</button>
+        `;
+        return;
+    }
+
+    if (setupView === "coup-create") {
+        content.innerHTML = `
+            <h2 style="color:#779556; margin-top:0;">Create Coup Game</h2>
+            <div class="input-group"><label>Room Password</label><input id="coupCreatePass" placeholder="Secret Code"></div>
+            <div class="input-group"><label>Your Username</label><input id="coupCreateName" value="Host"></div>
+            <button class="start-btn" onclick="createCoupRoom()">CREATE</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('coup-menu')">Return to Menu</button>
+        `;
+        return;
+    }
+
+    if (setupView === "coup-join") {
+        content.innerHTML = `
+            <h2 style="color:#779556; margin-top:0;">Join Coup Game</h2>
+            <div class="input-group"><label>Room Password</label><input id="coupJoinPass" placeholder="Enter Password"></div>
+            <div class="input-group"><label>Your Username</label><input id="coupJoinName" value="Player"></div>
+            <button class="start-btn" onclick="joinCoupRoom()">JOIN</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('coup-menu')">Return to Menu</button>
+        `;
+        return;
+    }
+
+    if (setupView === "coup-lobby" && coupLobby) {
+        const playersHtml = (coupLobby.players || []).map((player) => {
+            const isHost = player.socketId === coupLobby.hostId;
+            const canKick = socket.id === coupLobby.hostId && player.socketId !== socket.id;
+            return `
+                <div style="display:flex; justify-content:space-between; align-items:center; background:#1a1a1a; padding:10px; border-radius:6px; margin-bottom:8px;">
+                    <div>${player.name}${isHost ? " <span style='color:#779556'>(Host)</span>" : ""}</div>
+                    ${canKick ? `<button class="action-btn" style="padding:6px 10px; width:auto;" onclick="kickCoupPlayer('${player.socketId}')">Kick</button>` : ""}
+                </div>
+            `;
+        }).join('');
+        const enoughPlayers = (coupLobby.players || []).length >= 2;
+        const iAmHost = socket.id === coupLobby.hostId;
+        const statusLabel = iAmHost
+            ? (enoughPlayers ? "Start Game" : "Waiting for Players")
+            : (enoughPlayers ? "Waiting for Host" : "Waiting for Players");
+
+        content.innerHTML = `
+            <h2 style="color:#779556; margin-top:0;">Coup Lobby</h2>
+            <div style="background:#1a1a1a; padding:12px; border-radius:8px; margin-bottom:12px; text-align:left;">
+                <div style="font-size:12px; color:#bababa;">ROOM PASSWORD</div>
+                <div style="font-size:20px; letter-spacing:2px;">${coupLobby.password}</div>
+            </div>
+            <div style="text-align:left; margin-bottom:10px;"><b>Players</b></div>
+            <div style="max-height:220px; overflow-y:auto; text-align:left;">${playersHtml || "<div>No players yet.</div>"}</div>
+            <button class="start-btn" style="margin-top:10px;" ${iAmHost && enoughPlayers ? 'onclick="startCoupGame()"' : "disabled"}>${statusLabel}</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="changeCoupName()">Change Name</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="location.reload()">Leave Lobby</button>
         `;
     }
 }
 
 function setSetupView(view) {
     setupView = view;
+    if (view.startsWith("chess-")) selectedGame = "chess";
+    if (view.startsWith("coup-")) selectedGame = "coup";
     renderSetupCard();
 }
 
@@ -987,13 +1089,46 @@ function joinRoom() {
 
 function confirmJoin() { socket.emit("confirm-join", { password: currentPassword, name: tempName }); }
 
+function createCoupRoom() {
+    const password = document.getElementById('coupCreatePass').value.trim();
+    const name = document.getElementById('coupCreateName').value.trim();
+    if (!password || !name) return alert("Enter room password and username.");
+    currentPassword = password;
+    socket.emit("coup-create-room", { password, name });
+}
+
+function joinCoupRoom() {
+    const password = document.getElementById('coupJoinPass').value.trim();
+    const name = document.getElementById('coupJoinName').value.trim();
+    if (!password || !name) return alert("Enter room password and username.");
+    currentPassword = password;
+    socket.emit("coup-join-room", { password, name });
+}
+
+function changeCoupName() {
+    if (!coupLobby || !currentPassword) return;
+    const nextName = prompt("Enter your new name:");
+    if (!nextName || !nextName.trim()) return;
+    socket.emit("coup-change-name", { password: currentPassword, name: nextName.trim() });
+}
+
+function kickCoupPlayer(targetSocketId) {
+    if (!coupLobby || !currentPassword) return;
+    socket.emit("coup-kick-player", { password: currentPassword, targetSocketId });
+}
+
+function startCoupGame() {
+    if (!coupLobby || !currentPassword) return;
+    socket.emit("coup-start-game", { password: currentPassword });
+}
+
 function openSpectateMenu() {
     const content = document.getElementById('setup-card-content');
     if (!content) return;
     content.innerHTML = `
         <h2 style="color: #779556">Active Games</h2>
         <div id="spectate-games-list" style="max-height: 320px; overflow-y: auto; text-align: left;"></div>
-        <button class="action-btn" style="margin-top: 10px; width: 100%;" onclick="setSetupView('menu')">Back</button>
+        <button class="action-btn" style="margin-top: 10px; width: 100%;" onclick="setSetupView('chess-menu')">Back</button>
     `;
     socket.emit("list-active-games");
 }
@@ -1124,6 +1259,32 @@ function showRulesPopup() {
     document.body.appendChild(overlay);
 }
 
+function showCoupRulesPopup() {
+    if (document.getElementById('rules-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'rules-overlay';
+    overlay.style.position = 'fixed';
+    overlay.style.inset = '0';
+    overlay.style.background = 'rgba(0, 0, 0, 0.85)';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.zIndex = '2500';
+
+    overlay.innerHTML = `
+        <div class="result-card" style="max-width:420px; width:90%; text-align:left;">
+            <h2 style="text-align:center;">Coup Rules</h2>
+            <ul style="padding-left:18px; line-height:1.5; color:#ddd; font-size:14px;">
+                <li>Coup lobby setup is now available.</li>
+                <li>Gameplay actions are not implemented yet.</li>
+                <li>Create or join a room to gather players and prepare.</li>
+            </ul>
+            <button class="action-btn" style="width:100%; margin-top:10px;" onclick="closeRulesPopup()">Close</button>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+}
+
 function closeRulesPopup() {
     const overlay = document.getElementById('rules-overlay');
     if (overlay) overlay.remove();
@@ -1176,4 +1337,7 @@ function closeModal() {
     }
 }
 
-window.onload = showSetup;
+window.onload = () => {
+    setupView = "game-select";
+    showSetup();
+};

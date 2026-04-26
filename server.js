@@ -85,6 +85,7 @@ function emitCoupGameState(password) {
             password,
             hostId: room.hostId,
             players: publicPlayers,
+            deckCount: game.deck.length,
             currentTurnSocketId: game.players[game.turnIndex]?.socketId || null,
             phase: game.phase,
             pending: game.pending,

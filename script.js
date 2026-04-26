@@ -799,6 +799,7 @@ function render(forcedStatus) {
         renderCoupGame(layout);
         return;
     }
+    document.body.classList.remove("coup-mode");
     layout.className = "";
 
     if (!document.getElementById('chat-panel')) {
@@ -1162,6 +1163,7 @@ function returnToCoupTitlePage() {
 }
 
 function renderCoupGame(layout) {
+    document.body.classList.add("coup-mode");
     layout.innerHTML = "";
     layout.className = "coup-layout";
     const me = (coupGameState.players || []).find((p) => p.socketId === socket.id);

@@ -18,6 +18,7 @@ let spectatorRoster = [];
 let setupView = "menu";
 let selectedGame = null;
 let coupLobby = null;
+let coupGameState = null;
 
 let boardState;
 let currentTurn;
@@ -344,6 +345,22 @@ socket.on("coup-kicked", () => {
 
 socket.on("coup-start-placeholder", (data) => {
     alert(data.message || "Coup gameplay is coming soon.");
+});
+
+socket.on("coup-game-started", () => {
+    selectedGame = "coup";
+    setupView = "coup-game";
+    const overlay = document.getElementById('setup-overlay');
+    if (overlay) overlay.remove();
+});
+
+socket.on("coup-game-state", (data) => {
+    coupGameState = data;
+    selectedGame = "coup";
+    setupView = "coup-game";
+    const overlay = document.getElementById('setup-overlay');
+    if (overlay) overlay.remove();
+    render();
 });
 
 function appendChatMessage(sender, message, isSystem = false) {
@@ -778,6 +795,11 @@ function render(forcedStatus) {
     const layout = document.getElementById('main-layout');
     if (!layout) return;
 
+    if (selectedGame === "coup" && setupView === "coup-game" && coupGameState) {
+        renderCoupGame(layout);
+        return;
+    }
+
     if (!document.getElementById('chat-panel')) {
         const chatPanel = document.createElement('div');
         chatPanel.id = 'chat-panel';
@@ -1138,6 +1160,138 @@ function returnToCoupTitlePage() {
     leaveCoupLobby();
 }
 
+function renderCoupGame(layout) {
+    layout.innerHTML = "";
+    const me = (coupGameState.players || []).find((p) => p.socketId === socket.id);
+    const isMyTurn = coupGameState.currentTurnSocketId === socket.id;
+    const pending = coupGameState.pending;
+    const myCards = coupGameState.myCards || [];
+    const isAlive = !!(me && me.alive);
+
+    const left = document.createElement('div');
+    left.id = 'chat-panel';
+    left.innerHTML = `
+        <div id="chat-header">COUP LOG</div>
+        <div id="chat-messages"></div>
+    `;
+    layout.appendChild(left);
+    const logBox = left.querySelector('#chat-messages');
+    (coupGameState.log || []).forEach((entry) => {
+        const div = document.createElement('div');
+        div.className = 'chat-msg system';
+        div.textContent = entry;
+        logBox.appendChild(div);
+    });
+    logBox.scrollTop = logBox.scrollHeight;
+
+    const center = document.createElement('div');
+    center.id = 'game-area';
+    const playerCards = (coupGameState.players || []).map((player) => `
+        <div style="background:#1f1a2e; border:1px solid #4b3f70; border-radius:8px; padding:10px; margin-bottom:10px;">
+            <div><b>${player.name}</b>${player.socketId === coupGameState.currentTurnSocketId ? " (TURN)" : ""}${player.socketId === socket.id ? " (YOU)" : ""}</div>
+            <div>Coins: ${player.coins}</div>
+            <div>Influence: ${player.influence}</div>
+            <div>Revealed: ${(player.revealedCards || []).join(", ") || "None"}</div>
+        </div>
+    `).join("");
+
+    center.innerHTML = `
+        <div id="board-container" style="width:100%;">
+            <h2 style="margin-top:0; color:#ff9f43;">Coup</h2>
+            <div>${playerCards}</div>
+        </div>
+    `;
+    layout.appendChild(center);
+
+    const right = document.createElement('div');
+    right.id = 'side-panel';
+
+    const actionDisabled = !isMyTurn || !isAlive || coupGameState.phase !== "turn";
+    const targetOptions = (coupGameState.players || [])
+        .filter((p) => p.socketId !== socket.id && p.alive)
+        .map((p) => `<option value="${p.socketId}">${p.name}</option>`)
+        .join("");
+
+    right.innerHTML = `
+        <div id="status-box"><div id="status-text">${coupGameState.phase === "game-over" ? "GAME OVER" : (isMyTurn ? "YOUR TURN" : "WAITING")}</div></div>
+        <div style="background:#2a2242; border:1px solid #4b3f70; border-radius:8px; padding:10px;">
+            <div style="font-size:12px; color:#bababa;">YOUR INFLUENCE</div>
+            <div>${myCards.map((c) => c.revealed ? `(${c.role})` : c.role).join(" • ") || "None"}</div>
+            <div style="margin-top:6px;">Coins: ${me ? me.coins : 0}</div>
+        </div>
+        <div id="coup-prompt-area" style="margin-top:10px;"></div>
+        <div style="display:grid; gap:8px; margin-top:10px;">
+            <button class="action-btn" ${actionDisabled ? "disabled" : ""} onclick="sendCoupAction('income')">Income (+1)</button>
+            <button class="action-btn" ${actionDisabled ? "disabled" : ""} onclick="sendCoupAction('foreign_aid')">Foreign Aid (+2)</button>
+            <button class="action-btn" ${actionDisabled ? "disabled" : ""} onclick="sendCoupAction('tax')">Tax (Duke)</button>
+            <button class="action-btn" ${actionDisabled ? "disabled" : ""} onclick="sendCoupAction('exchange')">Exchange (Ambassador)</button>
+            <button class="action-btn" ${actionDisabled ? "disabled" : ""} onclick="sendCoupAction('steal', getCoupTarget())">Steal</button>
+            <button class="action-btn" ${actionDisabled ? "disabled" : ""} onclick="sendCoupAction('assassinate', getCoupTarget())">Assassinate</button>
+            <button class="action-btn" ${actionDisabled ? "disabled" : ""} onclick="sendCoupAction('coup', getCoupTarget())">Coup</button>
+            <select id="coup-target-select">${targetOptions}</select>
+            <button class="action-btn" onclick="location.reload()">Return to Title</button>
+        </div>
+    `;
+    layout.appendChild(right);
+
+    renderCoupPrompt(pending);
+}
+
+function getCoupTarget() {
+    const sel = document.getElementById('coup-target-select');
+    return sel ? sel.value : null;
+}
+
+function sendCoupAction(action, targetSocketId = null) {
+    if (!coupGameState || !currentPassword) return;
+    const payload = { password: currentPassword, action };
+    if (targetSocketId) payload.targetSocketId = targetSocketId;
+    socket.emit("coup-action", payload);
+}
+
+function sendCoupResponse(response, blockRole = null) {
+    if (!coupGameState || !currentPassword) return;
+    const payload = { password: currentPassword, response };
+    if (blockRole) payload.blockRole = blockRole;
+    socket.emit("coup-response", payload);
+}
+
+function renderCoupPrompt(pending) {
+    const prompt = document.getElementById('coup-prompt-area');
+    if (!prompt || !pending || coupGameState.phase !== "resolving") {
+        if (prompt) prompt.innerHTML = "";
+        return;
+    }
+    if (pending.kind === "action") {
+        const canChallenge = pending.claim && socket.id !== pending.actorId;
+        const canBlock = pending.targetId === socket.id && (pending.blockRoles || []).length > 0;
+        prompt.innerHTML = `
+            <div class="draw-modal">
+                <div><b>${pending.actorName}</b> attempts <b>${pending.action.replace("_", " ")}</b>.</div>
+                ${pending.claim ? `<div>Claimed role: ${pending.claim}</div>` : ""}
+                <div class="modal-btns">
+                    <button class="accept-btn" onclick="sendCoupResponse('pass')">Pass</button>
+                    ${canChallenge ? '<button class="decline-btn" onclick="sendCoupResponse(\'challenge\')">Challenge</button>' : ""}
+                    ${canBlock ? `<button class="decline-btn" onclick="sendCoupResponse('block', '${pending.blockRoles[0]}')">Block</button>` : ""}
+                </div>
+            </div>
+        `;
+        return;
+    }
+    if (pending.kind === "block") {
+        const canChallenge = socket.id !== pending.blockerId;
+        prompt.innerHTML = `
+            <div class="draw-modal">
+                <div><b>${pending.blockerName}</b> blocks with <b>${pending.blockClaim}</b>.</div>
+                <div class="modal-btns">
+                    <button class="accept-btn" onclick="sendCoupResponse('pass')">Accept Block</button>
+                    ${canChallenge ? '<button class="decline-btn" onclick="sendCoupResponse(\'challenge\')">Challenge Block</button>' : ""}
+                </div>
+            </div>
+        `;
+    }
+}
+
 function openSpectateMenu() {
     const content = document.getElementById('setup-card-content');
     if (!content) return;
@@ -1289,12 +1443,12 @@ function showCoupRulesPopup() {
 
     overlay.innerHTML = `
         <div class="result-card" style="max-width:420px; width:90%; text-align:left;">
-            <h2 style="text-align:center;">Coup Rules</h2>
-            <ul style="padding-left:18px; line-height:1.5; color:#ddd; font-size:14px;">
-                <li>Coup lobby setup is now available.</li>
-                <li>Gameplay actions are not implemented yet.</li>
-                <li>Create or join a room to gather players and prepare.</li>
-            </ul>
+            <h2 style="text-align:center;">Coup Rules</h2>␊
+            <ul style="padding-left:18px; line-height:1.5; color:#ddd; font-size:14px;">␊
+                <li>Standard mode roles: Duke, Assassin, Captain, Ambassador, Contessa.</li>
+                <li>Players begin with 2 coins and 2 influence cards; lose both and you are eliminated.</li>
+                <li>If you have 10+ coins at the start of your turn, you must Coup.</li>
+            </ul>␊
             <button class="action-btn" style="width:100%; margin-top:10px;" onclick="closeRulesPopup()">Close</button>
         </div>
     `;

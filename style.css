@@ -67,10 +67,10 @@ body { background: radial-gradient(circle at top, #2a2242 0%, #161321 50%, #0e0b
 @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
 
 /* --- COUP LAYOUT --- */
-body.coup-mode { align-items: flex-start; justify-content: flex-start; overflow-y: auto; padding: 12px; box-sizing: border-box; }
+body.coup-mode { align-items: flex-start; justify-content: flex-start; overflow-y: auto; padding: 12px 332px 12px 12px; box-sizing: border-box; }
 body.coup-mode #main-layout { width: 100%; max-width: none; display: block; }
 .coup-layout { width: 100%; max-height: none; }
-.coup-main-column { display: flex; flex-direction: column; gap: 12px; margin-right: 320px; width: calc(100vw - 356px); max-width: 1200px; }
+.coup-main-column { display: flex; flex-direction: column; gap: 12px; margin-right: 0; width: min(1100px, calc(100vw - 380px)); }
 .coup-panel { background: #1f1a2e; border: 1px solid #4b3f70; border-radius: 14px; padding: 14px; }
 .coup-top-panel { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .coup-title-wrap { display: flex; align-items: center; gap: 10px; }

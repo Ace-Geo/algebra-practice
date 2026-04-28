@@ -800,6 +800,8 @@ function render(forcedStatus) {
         return;
     }
     document.body.classList.remove("coup-mode");
+    const coupPrompt = document.getElementById('coup-prompt-area');
+    if (coupPrompt) coupPrompt.remove();
     layout.className = "";
 
     if (!document.getElementById('chat-panel')) {
@@ -1209,26 +1211,35 @@ function renderCoupGame(layout) {
         .filter((p) => p.socketId !== socket.id && p.alive)
         .map((p) => `<option value="${p.socketId}">${p.name}</option>`)
         .join("");
-    actionsPanel.innerHTML = `
-        <div class="coup-section-title">Choose Your Action</div>
-        <div class="coup-action-grid">
-            ${renderActionCard("income", "+1 coin (safe)", "c-action-income", actionDisabled, false)}
-            ${renderActionCard("foreign_aid", "+2 coins (blockable)", "c-action-aid", actionDisabled, false)}
-            ${renderActionCard("tax", "+3 coins (challengeable: Duke)", "c-action-tax", actionDisabled, false)}
-            ${renderActionCard("exchange", "Swap with deck (challengeable: Ambassador)", "c-action-exchange", actionDisabled, false)}
-        </div>
-        <div class="coup-section-title" style="margin-top:12px;">Targeted Actions</div>
-        <div style="margin-bottom:10px;">
-            <select id="coup-target-select" class="coup-target-select">${targetOptions}</select>
-        </div>
-        <div class="coup-target-grid">
-            ${renderActionCard("steal", "Take up to 2 coins (blockable)", "c-action-steal", actionDisabled, true)}
-            ${renderActionCard("assassinate", "Pay 3 to remove influence (blockable)", "c-action-assassinate", actionDisabled, true)}
-            ${renderActionCard("coup", "Pay 7 to force influence loss (unblockable)", "c-action-coup", actionDisabled, true)}
-        </div>
-        <div id="coup-prompt-area" style="margin-top:12px;"></div>
-        <button class="action-btn" style="margin-top:10px; width:100%;" onclick="location.reload()">Return to Title</button>
-    `;
+    const currentTurnPlayer = (coupGameState.players || []).find((p) => p.socketId === coupGameState.currentTurnSocketId);
+    if (!isMyTurn || coupGameState.phase !== "turn") {
+        actionsPanel.innerHTML = `
+            <div class="coup-waiting-box">
+                Waiting for <b>${currentTurnPlayer ? currentTurnPlayer.name : "player"}</b> to take their turn.
+            </div>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="location.reload()">Return to Title</button>
+        `;
+    } else {
+        actionsPanel.innerHTML = `
+            <div class="coup-section-title">Choose Your Action</div>
+            <div class="coup-action-grid">
+                ${renderActionCard("income", "+1 coin (safe)", "c-action-income", actionDisabled, false)}
+                ${renderActionCard("foreign_aid", "+2 coins (blockable)", "c-action-aid", actionDisabled, false)}
+                ${renderActionCard("tax", "+3 coins (challengeable: Duke)", "c-action-tax", actionDisabled, false)}
+                ${renderActionCard("exchange", "Swap with deck (challengeable: Ambassador)", "c-action-exchange", actionDisabled, false)}
+            </div>
+            <div class="coup-section-title" style="margin-top:12px;">Targeted Actions</div>
+            <div style="margin-bottom:10px;">
+                <select id="coup-target-select" class="coup-target-select">${targetOptions}</select>
+            </div>
+            <div class="coup-target-grid">
+                ${renderActionCard("steal", "Take up to 2 coins (blockable)", "c-action-steal", actionDisabled, true)}
+                ${renderActionCard("assassinate", "Pay 3 to remove influence (blockable)", "c-action-assassinate", actionDisabled, true)}
+                ${renderActionCard("coup", "Pay 7 to force influence loss (unblockable)", "c-action-coup", actionDisabled, true)}
+            </div>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="location.reload()">Return to Title</button>
+        `;
+    }
     main.appendChild(actionsPanel);
     layout.appendChild(main);
 
@@ -1248,6 +1259,13 @@ function renderCoupGame(layout) {
         logBox.appendChild(div);
     });
     logBox.scrollTop = logBox.scrollHeight;
+
+    const existingPrompt = document.getElementById('coup-prompt-area');
+    if (existingPrompt) existingPrompt.remove();
+    const popup = document.createElement('div');
+    popup.id = 'coup-prompt-area';
+    popup.className = 'coup-bottom-popup';
+    document.body.appendChild(popup);
 
     renderCoupPrompt(pending);
 }
@@ -1279,15 +1297,38 @@ function renderCoupPrompt(pending) {
     }
     if (pending.kind === "action") {
         const canChallenge = pending.claim && socket.id !== pending.actorId;
-        const canBlock = pending.targetId === socket.id && (pending.blockRoles || []).length > 0;
+        if (socket.id === pending.actorId) {
+            prompt.innerHTML = `<div class="draw-modal"><b>Waiting for all players to respond to your action...</b></div>`;
+            return;
+        }
+        const roleClaim = pending.claim ? pending.claim.charAt(0).toUpperCase() + pending.claim.slice(1) : null;
+        const allowLabel = pending.targetId === socket.id ? "Pass (Proceed to Block)" : "Allow";
         prompt.innerHTML = `
             <div class="draw-modal">
-                <div><b>${pending.actorName}</b> attempts <b>${pending.action.replace("_", " ")}</b>.</div>
-                ${pending.claim ? `<div>Claimed role: ${pending.claim}</div>` : ""}
+                <div><b>Challenge Opportunity!</b></div>
+                <div style="margin-top:8px;">${pending.actorName} claims to have ${roleClaim || "a required role"}.</div>
+                <div style="margin-top:8px;">If you challenge and they don't have ${roleClaim || "it"}, they lose influence.</div>
                 <div class="modal-btns">
-                    <button class="accept-btn" onclick="sendCoupResponse('pass')">Pass</button>
-                    ${canChallenge ? '<button class="decline-btn" onclick="sendCoupResponse(\'challenge\')">Challenge</button>' : ""}
-                    ${canBlock ? `<button class="decline-btn" onclick="sendCoupResponse('block', '${pending.blockRoles[0]}')">Block</button>` : ""}
+                    ${canChallenge ? '<button class="decline-btn" onclick="sendCoupResponse(\'challenge\')">Challenge</button>' : ''}
+                    <button class="accept-btn" onclick="sendCoupResponse('pass')">${allowLabel}</button>
+                </div>
+            </div>
+        `;
+        return;
+    }
+    if (pending.kind === "block-offer") {
+        if (socket.id !== pending.targetId) {
+            prompt.innerHTML = `<div class="draw-modal"><b>Waiting for ${pending.targetName} to decide whether to block...</b></div>`;
+            return;
+        }
+        prompt.innerHTML = `
+            <div class="draw-modal">
+                <div><b>Block Opportunity!</b></div>
+                <div style="margin-top:8px;">${pending.actorName} targeted you with <b>${pending.action.replace("_", " ")}</b>.</div>
+                <div style="margin-top:8px;">Choose whether to block or allow the action.</div>
+                <div class="modal-btns">
+                    <button class="decline-btn" onclick="sendCoupResponse('block', '${pending.blockRoles[0]}')">Block</button>
+                    <button class="accept-btn" onclick="sendCoupResponse('pass')">Allow</button>
                 </div>
             </div>
         `;
@@ -1311,6 +1352,7 @@ function getCoupPhaseText() {
     if (!coupGameState) return "Waiting";
     if (coupGameState.phase === "game-over") return "Game Over";
     if (coupGameState.pending?.kind === "action") return "Action / Challenge Window";
+    if (coupGameState.pending?.kind === "block-offer") return "Block Opportunity";
     if (coupGameState.pending?.kind === "block") return "Block Window";
     if (coupGameState.phase === "resolving") return "Resolving";
     return "Action";

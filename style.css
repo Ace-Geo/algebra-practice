@@ -117,3 +117,6 @@ body.coup-mode #main-layout { width: 100%; max-width: none; display: block; }
 .coup-log-column { background: #171324; border: 1px solid #3f335f; border-radius: 0; position: fixed; top: 0; right: 0; width: 300px; height: 100vh; display: flex; flex-direction: column; }
 .coup-log-header { padding: 12px; border-bottom: 1px solid #3f335f; color: #ff9f43; font-weight: 700; letter-spacing: 0.5px; }
 .coup-log-body { padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.coup-waiting-box { background: #2a2242; border: 1px solid #5f4e93; border-radius: 10px; padding: 16px; font-size: 18px; text-align: center; color: #f4eaff; }
+.coup-bottom-popup { position: fixed; left: 14px; right: 332px; bottom: 12px; z-index: 2200; pointer-events: none; }
+.coup-bottom-popup .draw-modal { pointer-events: auto; margin: 0; }

@@ -2,6 +2,12 @@ const socket = io("https://algebra-but-better.onrender.com", {
     transports: ["websocket", "polling"],
     rememberUpgrade: true
 });
+socket.on("connect", () => {
+    try {
+        const saved = JSON.parse(localStorage.getItem("chessSession") || "null");
+        if (saved?.password && saved?.name) socket.emit("rejoin-room", saved);
+    } catch (_) {}
+});
 
 let myColor = null;
 let currentPassword = null;
@@ -18,6 +24,7 @@ let spectatorRoster = [];
 let setupView = "menu";
 let selectedGame = null;
 let coupLobby = null;
+let coupGameState = null;
 
 let boardState;
 let currentTurn;
@@ -35,6 +42,7 @@ let rematchRequested = false;
 let gameSettings = null;
 let positionCounts = {};
 let halfmoveClock = 0;
+let lastMoveHighlight = null;
 
 // --- ADMIN & COMMAND STATE ---
 let isAdmin = false;
@@ -61,6 +69,10 @@ socket.on("player-assignment", (data) => {
         whiteName = data.oppName;
     }
     playerAdmins[myColor] = isAdmin;
+    try {
+        const myName = myColor === 'white' ? whiteName : blackName;
+        localStorage.setItem("chessSession", JSON.stringify({ password: currentPassword, name: myName }));
+    } catch (_) {}
     const overlay = document.getElementById('setup-overlay');
     if (overlay) overlay.remove();
     initGameState();
@@ -324,6 +336,61 @@ socket.on("rematch-start", () => {
 });
 
 socket.on("error-msg", (msg) => { alert(msg); });
+socket.on("room-closed", (data) => {
+    alert(data?.message || "The room closed because a player disconnected.");
+    location.reload();
+});
+socket.on("opponent-disconnected", (data) => {
+    showStatusMessage(data?.message || "Opponent disconnected. Waiting for reconnection...");
+});
+socket.on("opponent-reconnected", (data) => {
+    showStatusMessage(data?.message || "Opponent reconnected.");
+});
+socket.on("chess-state-sync-request", (data) => {
+    if (isSpectator || !currentPassword) return;
+    socket.emit("chess-state-sync", {
+        password: currentPassword,
+        targetSocketId: data.requesterId,
+        state: {
+            boardState,
+            currentTurn,
+            hasMoved,
+            enPassantTarget,
+            selected: null,
+            isGameOver,
+            isInfinite,
+            isPaused,
+            whiteTime,
+            blackTime,
+            increment,
+            moveHistory,
+            positionCounts,
+            halfmoveClock,
+            lastMoveHighlight
+        }
+    });
+});
+socket.on("chess-state-sync", (data) => {
+    if (!data?.state) return;
+    boardState = data.state.boardState;
+    currentTurn = data.state.currentTurn;
+    hasMoved = data.state.hasMoved || {};
+    enPassantTarget = data.state.enPassantTarget;
+    selected = null;
+    isGameOver = !!data.state.isGameOver;
+    isInfinite = !!data.state.isInfinite;
+    isPaused = !!data.state.isPaused;
+    whiteTime = data.state.whiteTime;
+    blackTime = data.state.blackTime;
+    increment = data.state.increment;
+    moveHistory = data.state.moveHistory || [];
+    positionCounts = data.state.positionCounts || {};
+    halfmoveClock = data.state.halfmoveClock || 0;
+    lastMoveHighlight = data.state.lastMoveHighlight || null;
+    if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
+    if (!isInfinite && !isGameOver && !isPaused) startTimer();
+    render();
+});
 
 socket.on("coup-lobby-update", (data) => {
     selectedGame = "coup";
@@ -344,6 +411,22 @@ socket.on("coup-kicked", () => {
 
 socket.on("coup-start-placeholder", (data) => {
     alert(data.message || "Coup gameplay is coming soon.");
+});
+
+socket.on("coup-game-started", () => {
+    selectedGame = "coup";
+    setupView = "coup-game";
+    const overlay = document.getElementById('setup-overlay');
+    if (overlay) overlay.remove();
+});
+
+socket.on("coup-game-state", (data) => {
+    coupGameState = data;
+    selectedGame = "coup";
+    setupView = "coup-game";
+    const overlay = document.getElementById('setup-overlay');
+    if (overlay) overlay.remove();
+    render();
 });
 
 function appendChatMessage(sender, message, isSystem = false) {
@@ -606,6 +689,8 @@ function canMoveTo(fromR, fromC, toR, toC, piece, board) {
         return false;
     }
     if ((piece === '♔' || piece === '♚') && adc === 2) {
+        if (adr !== 0 || toR !== fromR) return false;
+        if (!(toC === 2 || toC === 6)) return false;
         if (hasMoved[`${fromR},${fromC}`]) return false;
         if (isSquareAttacked(fromR, fromC, team === 'white' ? 'black' : 'white', board)) return false;
         const rookCol = toC === 6 ? 7 : 0;
@@ -642,6 +727,12 @@ function isTeamInCheck(team, board) {
 function isMoveLegal(fromR, fromC, toR, toC, team) {
     const piece = boardState[fromR][fromC];
     if (!canMoveTo(fromR, fromC, toR, toC, piece, boardState)) return false;
+    if ((piece === '♔' || piece === '♚') && Math.abs(toC - fromC) === 2) {
+        const enemy = team === 'white' ? 'black' : 'white';
+        const step = toC > fromC ? 1 : -1;
+        if (isSquareAttacked(fromR, fromC + step, enemy, boardState)) return false;
+        if (isSquareAttacked(toR, toC, enemy, boardState)) return false;
+    }
     const nextBoard = boardState.map(row => [...row]);
     nextBoard[toR][toC] = piece;
     nextBoard[fromR][fromC] = '';
@@ -726,6 +817,7 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
     let notation = getNotation(from.r, from.c, to.r, to.c, movingPiece, targetPiece, isEP, castleType);
     if (isEP) boardState[from.r][to.c] = '';
     hasMoved[`${from.r},${from.c}`] = true;
+    lastMoveHighlight = { from: { r: from.r, c: from.c }, to: { r: to.r, c: to.c } };
     boardState[to.r][to.c] = movingPiece; boardState[from.r][from.c] = '';
     let promotedTo = null;
     if (movingPiece === '♙' && to.r === 0) {
@@ -778,6 +870,15 @@ function render(forcedStatus) {
     const layout = document.getElementById('main-layout');
     if (!layout) return;
 
+    if (selectedGame === "coup" && setupView === "coup-game" && coupGameState) {
+        renderCoupGame(layout);
+        return;
+    }
+    document.body.classList.remove("coup-mode");
+    const coupPrompt = document.getElementById('coup-prompt-area');
+    if (coupPrompt) coupPrompt.remove();
+    layout.className = "";
+
     if (!document.getElementById('chat-panel')) {
         const chatPanel = document.createElement('div');
         chatPanel.id = 'chat-panel';
@@ -829,13 +930,17 @@ function render(forcedStatus) {
             const sq = document.createElement('div'); sq.className = `square ${(r + c) % 2 === 0 ? 'white-sq' : 'black-sq'}`;
             if (check && boardState[r][c] === (currentTurn === 'white' ? '♔' : '♚')) sq.classList.add('king-check');
             if (selected && selected.r === r && selected.c === c) sq.classList.add('selected');
+            if (lastMoveHighlight && lastMoveHighlight.from.r === r && lastMoveHighlight.from.c === c) sq.classList.add('last-from');
+            if (lastMoveHighlight && lastMoveHighlight.to.r === r && lastMoveHighlight.to.c === c) sq.classList.add('last-to');
             if (hints.some(h => h.r === r && h.c === c)) {
                 const hint = document.createElement('div'); hint.className = boardState[r][c] === '' ? 'hint-dot' : 'hint-capture';
                 sq.appendChild(hint);
             }
             if (boardState[r][c] !== '') {
-                const span = document.createElement('span'); span.className = `piece ${isWhite(boardState[r][c]) ? 'w-piece' : 'b-piece'}`;
-                span.textContent = boardState[r][c]; sq.appendChild(span);
+                const span = document.createElement('span');
+                const pieceClass = getPieceTextureClass(boardState[r][c]);
+                span.className = `piece textured-piece ${pieceClass}`;
+                sq.appendChild(span);
             }
             sq.onclick = async () => {
                 if (isSpectator || isGameOver || currentTurn !== myColor) return;
@@ -928,6 +1033,7 @@ function initGameState() {
         ['♙', '♙', '♙', '♙', '♙', '♙', '♙', '♙'], ['♖', '♘', '♗', '♕', '♔', '♗', '♘', '♖']
     ];
     currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false; selected = null; rematchRequested = false; isPaused = false;
+    lastMoveHighlight = null;
     halfmoveClock = 0;
     boardPerspective = isSpectator ? 'white' : myColor;
     if (gameSettings) {
@@ -1063,9 +1169,18 @@ function renderSetupCard() {
             <div style="max-height:220px; overflow-y:auto; text-align:left;">${playersHtml || "<div>No players yet.</div>"}</div>
             <button class="start-btn" style="margin-top:10px;" ${iAmHost && enoughPlayers ? 'onclick="startCoupGame()"' : "disabled"}>${statusLabel}</button>
             <button class="action-btn" style="margin-top:10px; width:100%;" onclick="changeCoupName()">Change Name</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="location.reload()">Leave Lobby</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="leaveCoupLobby()">Leave Lobby</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="returnToCoupTitlePage()">Return to Coup Title Page</button>
         `;
     }
+}
+
+function getPieceTextureClass(piece) {
+    const map = {
+        '♔': 'white-king', '♕': 'white-queen', '♖': 'white-rook', '♗': 'white-bishop', '♘': 'white-knight', '♙': 'white-pawn',
+        '♚': 'black-king', '♛': 'black-queen', '♜': 'black-rook', '♝': 'black-bishop', '♞': 'black-knight', '♟': 'black-pawn'
+    };
+    return map[piece] || '';
 }
 
 function setSetupView(view) {
@@ -1078,12 +1193,14 @@ function setSetupView(view) {
 function createRoom() {
     currentPassword = document.getElementById('roomPass').value; tempName = document.getElementById('uName').value;
     if (!currentPassword) return alert("Enter password.");
+    try { localStorage.setItem("chessSession", JSON.stringify({ password: currentPassword, name: tempName })); } catch (_) {}
     socket.emit("create-room", { password: currentPassword, name: tempName, mins: document.getElementById('tMin').value, secs: document.getElementById('tSec').value, inc: document.getElementById('tInc').value, colorPref: document.getElementById('colorPref').value });
 }
 
 function joinRoom() {
     currentPassword = document.getElementById('joinPass').value; tempName = document.getElementById('joinName').value;
     if (!currentPassword) return alert("Enter password.");
+    try { localStorage.setItem("chessSession", JSON.stringify({ password: currentPassword, name: tempName })); } catch (_) {}
     socket.emit("join-attempt", { password: currentPassword });
 }
 
@@ -1120,6 +1237,262 @@ function kickCoupPlayer(targetSocketId) {
 function startCoupGame() {
     if (!coupLobby || !currentPassword) return;
     socket.emit("coup-start-game", { password: currentPassword });
+}
+
+function leaveCoupLobby() {
+    if (currentPassword) {
+        socket.emit("coup-leave-room", { password: currentPassword });
+    }
+    selectedGame = "coup";
+    setupView = "coup-menu";
+    coupLobby = null;
+    currentPassword = null;
+    renderSetupCard();
+}
+
+function returnToCoupTitlePage() {
+    leaveCoupLobby();
+}
+
+function renderCoupGame(layout) {
+    document.body.classList.add("coup-mode");
+    layout.innerHTML = "";
+    layout.className = "coup-layout";
+    const me = (coupGameState.players || []).find((p) => p.socketId === socket.id);
+    const isMyTurn = coupGameState.currentTurnSocketId === socket.id;
+    const pending = coupGameState.pending;
+    const myCards = coupGameState.myCards || [];
+    const isAlive = !!(me && me.alive);
+    const aliveCount = (coupGameState.players || []).filter((p) => p.alive).length;
+    const phaseText = getCoupPhaseText();
+
+    const main = document.createElement('div');
+    main.className = "coup-main-column";
+
+    const topPanel = document.createElement('div');
+    topPanel.className = "coup-panel coup-top-panel";
+    topPanel.innerHTML = `
+        <div class="coup-title-wrap">
+            <div class="coup-title">Coup - Standard</div>
+            <button class="action-btn coup-rules-btn" onclick="showCoupRulesPopup()">Rules</button>
+        </div>
+        <div class="coup-top-stats">
+            <span>Deck: <b>${coupGameState.deckCount ?? 0}</b></span>
+            <span>Alive: <b>${aliveCount}</b></span>
+            <span>Status: <b>${phaseText}</b></span>
+        </div>
+    `;
+    main.appendChild(topPanel);
+
+    const playersPanel = document.createElement('div');
+    playersPanel.className = "coup-panel";
+    const rowsClass = (coupGameState.players || []).length < 4 ? "one-row" : "";
+    playersPanel.innerHTML = `
+        <div class="coup-players-grid ${rowsClass}">
+            ${(coupGameState.players || []).map((player) => renderCoupPlayerPanel(player)).join("")}
+        </div>
+    `;
+    main.appendChild(playersPanel);
+
+    const actionsPanel = document.createElement('div');
+    actionsPanel.className = "coup-panel coup-actions-panel";
+    const actionDisabled = !isMyTurn || !isAlive || coupGameState.phase !== "turn";
+    const targetOptions = (coupGameState.players || [])
+        .filter((p) => p.socketId !== socket.id && p.alive)
+        .map((p) => `<option value="${p.socketId}">${p.name}</option>`)
+        .join("");
+    const currentTurnPlayer = (coupGameState.players || []).find((p) => p.socketId === coupGameState.currentTurnSocketId);
+    if (!isMyTurn || coupGameState.phase !== "turn") {
+        actionsPanel.innerHTML = `
+            <div class="coup-waiting-box">
+                Waiting for <b>${currentTurnPlayer ? currentTurnPlayer.name : "player"}</b> to take their turn.
+            </div>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="location.reload()">Return to Title</button>
+        `;
+    } else {
+        actionsPanel.innerHTML = `
+            <div class="coup-section-title">Choose Your Action</div>
+            <div class="coup-action-grid">
+                ${renderActionCard("income", "+1 coin (safe)", "c-action-income", actionDisabled, false)}
+                ${renderActionCard("foreign_aid", "+2 coins (blockable)", "c-action-aid", actionDisabled, false)}
+                ${renderActionCard("tax", "+3 coins (challengeable: Duke)", "c-action-tax", actionDisabled, false)}
+                ${renderActionCard("exchange", "Swap with deck (challengeable: Ambassador)", "c-action-exchange", actionDisabled, false)}
+            </div>
+            <div class="coup-section-title" style="margin-top:12px;">Targeted Actions</div>
+            <div style="margin-bottom:10px;">
+                <select id="coup-target-select" class="coup-target-select">${targetOptions}</select>
+            </div>
+            <div class="coup-target-grid">
+                ${renderActionCard("steal", "Take up to 2 coins (blockable)", "c-action-steal", actionDisabled, true)}
+                ${renderActionCard("assassinate", "Pay 3 to remove influence (blockable)", "c-action-assassinate", actionDisabled, true)}
+                ${renderActionCard("coup", "Pay 7 to force influence loss (unblockable)", "c-action-coup", actionDisabled, true)}
+            </div>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="location.reload()">Return to Title</button>
+        `;
+    }
+    main.appendChild(actionsPanel);
+    layout.appendChild(main);
+
+    const logPanel = document.createElement('div');
+    logPanel.className = "coup-log-column";
+    logPanel.innerHTML = `
+        <div class="coup-log-header">GAME LOG</div>
+        <div class="coup-log-body" id="coup-log-body"></div>
+    `;
+    layout.appendChild(logPanel);
+
+    const logBox = document.getElementById('coup-log-body');
+    (coupGameState.log || []).forEach((entry) => {
+        const div = document.createElement('div');
+        div.className = 'chat-msg system';
+        div.textContent = entry;
+        logBox.appendChild(div);
+    });
+    logBox.scrollTop = logBox.scrollHeight;
+
+    const existingPrompt = document.getElementById('coup-prompt-area');
+    if (existingPrompt) existingPrompt.remove();
+    const popup = document.createElement('div');
+    popup.id = 'coup-prompt-area';
+    popup.className = 'coup-bottom-popup';
+    document.body.appendChild(popup);
+
+    renderCoupPrompt(pending);
+}
+
+function getCoupTarget() {
+    const sel = document.getElementById('coup-target-select');
+    return sel ? sel.value : null;
+}
+
+function sendCoupAction(action, targetSocketId = null) {
+    if (!coupGameState || !currentPassword) return;
+    const payload = { password: currentPassword, action };
+    if (targetSocketId) payload.targetSocketId = targetSocketId;
+    socket.emit("coup-action", payload);
+}
+
+function sendCoupResponse(response, blockRole = null) {
+    if (!coupGameState || !currentPassword) return;
+    const payload = { password: currentPassword, response };
+    if (blockRole) payload.blockRole = blockRole;
+    socket.emit("coup-response", payload);
+}
+
+function renderCoupPrompt(pending) {
+    const prompt = document.getElementById('coup-prompt-area');
+    if (!prompt || !pending || coupGameState.phase !== "resolving") {
+        if (prompt) prompt.innerHTML = "";
+        return;
+    }
+    if (pending.kind === "action") {
+        const canChallenge = pending.claim && socket.id !== pending.actorId;
+        if (socket.id === pending.actorId) {
+            prompt.innerHTML = `<div class="draw-modal"><b>Waiting for all players to respond to your action...</b></div>`;
+            return;
+        }
+        const roleClaim = pending.claim ? pending.claim.charAt(0).toUpperCase() + pending.claim.slice(1) : null;
+        const allowLabel = pending.targetId === socket.id ? "Pass (Proceed to Block)" : "Allow";
+        prompt.innerHTML = `
+            <div class="draw-modal">
+                <div><b>Challenge Opportunity!</b></div>
+                <div style="margin-top:8px;">${pending.actorName} claims to have ${roleClaim || "a required role"}.</div>
+                <div style="margin-top:8px;">If you challenge and they don't have ${roleClaim || "it"}, they lose influence.</div>
+                <div class="modal-btns">
+                    ${canChallenge ? '<button class="decline-btn" onclick="sendCoupResponse(\'challenge\')">Challenge</button>' : ''}
+                    <button class="accept-btn" onclick="sendCoupResponse('pass')">${allowLabel}</button>
+                </div>
+            </div>
+        `;
+        return;
+    }
+    if (pending.kind === "block-offer") {
+        if (socket.id !== pending.targetId) {
+            prompt.innerHTML = `<div class="draw-modal"><b>Waiting for ${pending.targetName} to decide whether to block...</b></div>`;
+            return;
+        }
+        prompt.innerHTML = `
+            <div class="draw-modal">
+                <div><b>Block Opportunity!</b></div>
+                <div style="margin-top:8px;">${pending.actorName} targeted you with <b>${pending.action.replace("_", " ")}</b>.</div>
+                <div style="margin-top:8px;">Choose whether to block or allow the action.</div>
+                <div class="modal-btns">
+                    <button class="decline-btn" onclick="sendCoupResponse('block', '${pending.blockRoles[0]}')">Block</button>
+                    <button class="accept-btn" onclick="sendCoupResponse('pass')">Allow</button>
+                </div>
+            </div>
+        `;
+        return;
+    }
+    if (pending.kind === "block") {
+        const canChallenge = socket.id !== pending.blockerId;
+        prompt.innerHTML = `
+            <div class="draw-modal">
+                <div><b>${pending.blockerName}</b> blocks with <b>${pending.blockClaim}</b>.</div>
+                <div class="modal-btns">
+                    <button class="accept-btn" onclick="sendCoupResponse('pass')">Accept Block</button>
+                    ${canChallenge ? '<button class="decline-btn" onclick="sendCoupResponse(\'challenge\')">Challenge Block</button>' : ""}
+                </div>
+            </div>
+        `;
+    }
+}
+
+function getCoupPhaseText() {
+    if (!coupGameState) return "Waiting";
+    if (coupGameState.phase === "game-over") return "Game Over";
+    if (coupGameState.pending?.kind === "action") return "Action / Challenge Window";
+    if (coupGameState.pending?.kind === "block-offer") return "Block Opportunity";
+    if (coupGameState.pending?.kind === "block") return "Block Window";
+    if (coupGameState.phase === "resolving") return "Resolving";
+    return "Action";
+}
+
+function renderCoupPlayerPanel(player) {
+    const me = socket.id === player.socketId;
+    const turn = coupGameState.currentTurnSocketId === player.socketId;
+    const waitingOnAction = coupGameState.phase === "turn" && turn;
+    const waitingOnResponse = coupGameState.phase === "resolving" && coupGameState.pending && player.alive;
+    const indicator = waitingOnAction ? "Choosing Action" : (waitingOnResponse ? "Waiting / Respond" : "Idle");
+    const myCards = me ? (coupGameState.myCards || []) : [];
+    const revealedCards = player.revealedCards || [];
+    const hiddenCount = Math.max(0, player.influence);
+    const cards = [];
+
+    if (me) {
+        myCards.forEach((card) => {
+            cards.push(`<div class="coup-card ${card.revealed ? 'revealed' : ''} ${card.revealed ? 'role-' + card.role : 'role-' + card.role}">
+                <span>${card.role}</span>
+            </div>`);
+        });
+    } else {
+        for (let i = 0; i < hiddenCount; i++) cards.push('<div class="coup-card hidden-card"></div>');
+        revealedCards.forEach((role) => cards.push(`<div class="coup-card revealed role-${role}"><span>${role}</span></div>`));
+    }
+
+    return `
+        <div class="coup-player-panel ${!player.alive ? 'eliminated' : ''}">
+            <div class="coup-player-head">
+                <div><b>${player.name}</b> ${me ? '<span class="tag-you">YOU</span>' : ''}</div>
+                <div class="coins">${player.coins} coins</div>
+            </div>
+            <div class="coup-indicators">
+                ${turn ? '<span class="tag-turn">TURN</span>' : ''}
+                ${player.alive ? `<span class="tag-wait">${indicator}</span>` : '<span class="tag-out">OUT</span>'}
+            </div>
+            <div class="coup-cards-row">${cards.join("")}</div>
+        </div>
+    `;
+}
+
+function renderActionCard(action, desc, cssClass, disabled, targeted) {
+    const targetArg = targeted ? ", getCoupTarget()" : "";
+    return `
+        <button class="coup-action-card ${cssClass} ${targeted ? 'targeted' : ''}" ${disabled ? "disabled" : ""} onclick="sendCoupAction('${action}'${targetArg})">
+            <div class="name">${action.replace('_', ' ').toUpperCase()}</div>
+            <div class="desc">${desc}</div>
+        </button>
+    `;
 }
 
 function openSpectateMenu() {
@@ -1275,9 +1648,9 @@ function showCoupRulesPopup() {
         <div class="result-card" style="max-width:420px; width:90%; text-align:left;">
             <h2 style="text-align:center;">Coup Rules</h2>
             <ul style="padding-left:18px; line-height:1.5; color:#ddd; font-size:14px;">
-                <li>Coup lobby setup is now available.</li>
-                <li>Gameplay actions are not implemented yet.</li>
-                <li>Create or join a room to gather players and prepare.</li>
+                <li>Standard mode roles: Duke, Assassin, Captain, Ambassador, Contessa.</li>
+                <li>Players begin with 2 coins and 2 influence cards; lose both and you are eliminated.</li>
+                <li>If you have 10+ coins at the start of your turn, you must Coup.</li>
             </ul>
             <button class="action-btn" style="width:100%; margin-top:10px;" onclick="closeRulesPopup()">Close</button>
         </div>

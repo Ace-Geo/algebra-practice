@@ -176,8 +176,7 @@ io.on("connection", (socket) => {
             settings: { mins, secs, inc, colorPref },
             status: "waiting",
             players: { white: null, black: null, whiteName: null, blackName: null, whiteAdmin: false, blackAdmin: false },
-            spectators: {},
-            reconnectDeadline: null
+            spectators: {}
         };
         socket.emit("room-created", { password });
     });
@@ -225,7 +224,6 @@ io.on("connection", (socket) => {
         room.players.blackName = blackId === creatorId ? room.creatorName : name;
         room.players.whiteAdmin = false;
         room.players.blackAdmin = false;
-        room.reconnectDeadline = null;
 
         io.to(creatorId).emit("player-assignment", {
             color: creatorId === whiteId ? 'white' : 'black',
@@ -237,37 +235,6 @@ io.on("connection", (socket) => {
             settings: room.settings,
             oppName: room.creatorName
         });
-    });
-
-    socket.on("rejoin-room", (data) => {
-        const { password, name } = data || {};
-        if (!password || !name) return;
-        const room = rooms[password];
-        if (!room || room.status !== "active") return;
-
-        let color = null;
-        if (room.players.whiteName === name && !room.players.white) {
-            room.players.white = socket.id;
-            color = "white";
-        } else if (room.players.blackName === name && !room.players.black) {
-            room.players.black = socket.id;
-            color = "black";
-        }
-        if (!color) return;
-
-        socket.join(password);
-        if (room.reconnectDeadline) {
-            clearTimeout(room.reconnectDeadline);
-            room.reconnectDeadline = null;
-        }
-
-        const oppName = color === "white" ? room.players.blackName : room.players.whiteName;
-        socket.emit("player-assignment", { color, settings: room.settings, oppName });
-        socket.to(password).emit("opponent-reconnected", { message: `${name} reconnected.` });
-
-        const requesterId = socket.id;
-        const targetId = color === "white" ? room.players.black : room.players.white;
-        if (targetId) io.to(targetId).emit("chess-state-sync-request", { requesterId });
     });
 
     socket.on("coup-create-room", (data) => {
@@ -770,28 +737,11 @@ io.on("connection", (socket) => {
 
             const isPlayer = room.creatorId === socket.id || room.players.white === socket.id || room.players.black === socket.id;
             if (isPlayer) {
-                if (room.status === "active") {
-                    const isWhite = room.players.white === socket.id;
-                    const isBlack = room.players.black === socket.id;
-                    if (isWhite) room.players.white = null;
-                    if (isBlack) room.players.black = null;
-                    socket.to(roomPass).emit("opponent-disconnected", {
-                        message: "Opponent disconnected. Waiting for reconnection..."
-                    });
-                    if (room.reconnectDeadline) clearTimeout(room.reconnectDeadline);
-                    room.reconnectDeadline = setTimeout(() => {
-                        if (!room.players.white || !room.players.black) {
-                            io.in(roomPass).emit("room-closed", {
-                                message: "A player did not reconnect in time. Room closed."
-                            });
-                            delete rooms[roomPass];
-                            if (roomRematchStates[roomPass]) delete roomRematchStates[roomPass];
-                        }
-                    }, 30000);
-                } else {
-                    delete rooms[roomPass];
-                    if (roomRematchStates[roomPass]) delete roomRematchStates[roomPass];
-                }
+                socket.to(roomPass).emit("room-closed", {
+                    message: "Your opponent disconnected. The room has been closed."
+                });
+                delete rooms[roomPass];
+                if (roomRematchStates[roomPass]) delete roomRematchStates[roomPass];
             }
         });
 

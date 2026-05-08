@@ -32,27 +32,10 @@ body { background: radial-gradient(circle at top, #2a2242 0%, #161321 50%, #0e0b
 .white-sq { background: #eeeed2; }
 .black-sq { background: #8a57c7; }
 .selected { background: #f6f669 !important; }
-.last-from.white-sq { background: #f2e882 !important; }
-.last-from.black-sq { background: #c9b94a !important; }
-.last-to.white-sq { background: #efe06a !important; }
-.last-to.black-sq { background: #b9a936 !important; }
 .king-check { background: #e66b6b !important; }
 .piece { font-size: 50px; user-select: none; z-index: 5; line-height: 1; }
 .w-piece { color: #fff; text-shadow: 1px 1px 2px #000; }
 .b-piece { color: #000; }
-.textured-piece { width: 54px; height: 54px; background-size: contain; background-position: center; background-repeat: no-repeat; }
-.textured-piece.white-king { background-image: url("textures/chess_pieces/white_king.png"); }
-.textured-piece.white-queen { background-image: url("textures/chess_pieces/white_queen.png"); }
-.textured-piece.white-rook { background-image: url("textures/chess_pieces/white_rook.png"); }
-.textured-piece.white-bishop { background-image: url("textures/chess_pieces/white_bishop.png"); }
-.textured-piece.white-knight { background-image: url("textures/chess_pieces/white_knight.png"); }
-.textured-piece.white-pawn { background-image: url("textures/chess_pieces/white_pawn.png"); }
-.textured-piece.black-king { background-image: url("textures/chess_pieces/black_king.png"); }
-.textured-piece.black-queen { background-image: url("textures/chess_pieces/black_queen.png"); }
-.textured-piece.black-rook { background-image: url("textures/chess_pieces/black_rook.png"); }
-.textured-piece.black-bishop { background-image: url("textures/chess_pieces/black_bishop.png"); }
-.textured-piece.black-knight { background-image: url("textures/chess_pieces/black_knight.png"); }
-.textured-piece.black-pawn { background-image: url("textures/chess_pieces/black_pawn.png"); }
 .player-bar { display: flex; justify-content: space-between; align-items: center; background: #1f1a2e; padding: 10px 15px; width: 100%; box-sizing: border-box; border: 1px solid #4b3f70; }
 .timer { font-family: monospace; font-size: 22px; background: #12101b; padding: 4px 12px; border-radius: 6px; border: 1px solid #5e4c91; min-width: 80px; text-align: center; }
 .timer.active { background: #fff; color: #000; font-weight: bold; }

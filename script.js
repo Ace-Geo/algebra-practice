@@ -2,6 +2,12 @@ const socket = io("https://algebra-but-better.onrender.com", {
     transports: ["websocket", "polling"],
     rememberUpgrade: true
 });
+socket.on("connect", () => {
+    try {
+        const saved = JSON.parse(localStorage.getItem("chessSession") || "null");
+        if (saved?.password && saved?.name) socket.emit("rejoin-room", saved);
+    } catch (_) {}
+});
 
 let myColor = null;
 let currentPassword = null;
@@ -36,6 +42,7 @@ let rematchRequested = false;
 let gameSettings = null;
 let positionCounts = {};
 let halfmoveClock = 0;
+let lastMoveHighlight = null;
 
 // --- ADMIN & COMMAND STATE ---
 let isAdmin = false;
@@ -62,6 +69,10 @@ socket.on("player-assignment", (data) => {
         whiteName = data.oppName;
     }
     playerAdmins[myColor] = isAdmin;
+    try {
+        const myName = myColor === 'white' ? whiteName : blackName;
+        localStorage.setItem("chessSession", JSON.stringify({ password: currentPassword, name: myName }));
+    } catch (_) {}
     const overlay = document.getElementById('setup-overlay');
     if (overlay) overlay.remove();
     initGameState();
@@ -328,6 +339,57 @@ socket.on("error-msg", (msg) => { alert(msg); });
 socket.on("room-closed", (data) => {
     alert(data?.message || "The room closed because a player disconnected.");
     location.reload();
+});
+socket.on("opponent-disconnected", (data) => {
+    showStatusMessage(data?.message || "Opponent disconnected. Waiting for reconnection...");
+});
+socket.on("opponent-reconnected", (data) => {
+    showStatusMessage(data?.message || "Opponent reconnected.");
+});
+socket.on("chess-state-sync-request", (data) => {
+    if (isSpectator || !currentPassword) return;
+    socket.emit("chess-state-sync", {
+        password: currentPassword,
+        targetSocketId: data.requesterId,
+        state: {
+            boardState,
+            currentTurn,
+            hasMoved,
+            enPassantTarget,
+            selected: null,
+            isGameOver,
+            isInfinite,
+            isPaused,
+            whiteTime,
+            blackTime,
+            increment,
+            moveHistory,
+            positionCounts,
+            halfmoveClock,
+            lastMoveHighlight
+        }
+    });
+});
+socket.on("chess-state-sync", (data) => {
+    if (!data?.state) return;
+    boardState = data.state.boardState;
+    currentTurn = data.state.currentTurn;
+    hasMoved = data.state.hasMoved || {};
+    enPassantTarget = data.state.enPassantTarget;
+    selected = null;
+    isGameOver = !!data.state.isGameOver;
+    isInfinite = !!data.state.isInfinite;
+    isPaused = !!data.state.isPaused;
+    whiteTime = data.state.whiteTime;
+    blackTime = data.state.blackTime;
+    increment = data.state.increment;
+    moveHistory = data.state.moveHistory || [];
+    positionCounts = data.state.positionCounts || {};
+    halfmoveClock = data.state.halfmoveClock || 0;
+    lastMoveHighlight = data.state.lastMoveHighlight || null;
+    if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
+    if (!isInfinite && !isGameOver && !isPaused) startTimer();
+    render();
 });
 
 socket.on("coup-lobby-update", (data) => {
@@ -755,6 +817,7 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
     let notation = getNotation(from.r, from.c, to.r, to.c, movingPiece, targetPiece, isEP, castleType);
     if (isEP) boardState[from.r][to.c] = '';
     hasMoved[`${from.r},${from.c}`] = true;
+    lastMoveHighlight = { from: { r: from.r, c: from.c }, to: { r: to.r, c: to.c } };
     boardState[to.r][to.c] = movingPiece; boardState[from.r][from.c] = '';
     let promotedTo = null;
     if (movingPiece === '♙' && to.r === 0) {
@@ -867,13 +930,17 @@ function render(forcedStatus) {
             const sq = document.createElement('div'); sq.className = `square ${(r + c) % 2 === 0 ? 'white-sq' : 'black-sq'}`;
             if (check && boardState[r][c] === (currentTurn === 'white' ? '♔' : '♚')) sq.classList.add('king-check');
             if (selected && selected.r === r && selected.c === c) sq.classList.add('selected');
+            if (lastMoveHighlight && lastMoveHighlight.from.r === r && lastMoveHighlight.from.c === c) sq.classList.add('last-from');
+            if (lastMoveHighlight && lastMoveHighlight.to.r === r && lastMoveHighlight.to.c === c) sq.classList.add('last-to');
             if (hints.some(h => h.r === r && h.c === c)) {
                 const hint = document.createElement('div'); hint.className = boardState[r][c] === '' ? 'hint-dot' : 'hint-capture';
                 sq.appendChild(hint);
             }
             if (boardState[r][c] !== '') {
-                const span = document.createElement('span'); span.className = `piece ${isWhite(boardState[r][c]) ? 'w-piece' : 'b-piece'}`;
-                span.textContent = boardState[r][c]; sq.appendChild(span);
+                const span = document.createElement('span');
+                const pieceClass = getPieceTextureClass(boardState[r][c]);
+                span.className = `piece textured-piece ${pieceClass}`;
+                sq.appendChild(span);
             }
             sq.onclick = async () => {
                 if (isSpectator || isGameOver || currentTurn !== myColor) return;
@@ -966,6 +1033,7 @@ function initGameState() {
         ['♙', '♙', '♙', '♙', '♙', '♙', '♙', '♙'], ['♖', '♘', '♗', '♕', '♔', '♗', '♘', '♖']
     ];
     currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false; selected = null; rematchRequested = false; isPaused = false;
+    lastMoveHighlight = null;
     halfmoveClock = 0;
     boardPerspective = isSpectator ? 'white' : myColor;
     if (gameSettings) {
@@ -1081,6 +1149,7 @@ function renderSetupCard() {
             return `
                 <div style="display:flex; justify-content:space-between; align-items:center; background:#1a1a1a; padding:10px; border-radius:6px; margin-bottom:8px;">
                     <div>${player.name}${isHost ? " <span style='color:#779556'>(Host)</span>" : ""}</div>
+
                     ${canKick ? `<button class="action-btn" style="padding:6px 10px; width:auto;" onclick="kickCoupPlayer('${player.socketId}')">Kick</button>` : ""}
                 </div>
             `;
@@ -1107,6 +1176,14 @@ function renderSetupCard() {
     }
 }
 
+function getPieceTextureClass(piece) {
+    const map = {
+        '♔': 'white-king', '♕': 'white-queen', '♖': 'white-rook', '♗': 'white-bishop', '♘': 'white-knight', '♙': 'white-pawn',
+        '♚': 'black-king', '♛': 'black-queen', '♜': 'black-rook', '♝': 'black-bishop', '♞': 'black-knight', '♟': 'black-pawn'
+    };
+    return map[piece] || '';
+}
+
 function setSetupView(view) {
     setupView = view;
     if (view.startsWith("chess-")) selectedGame = "chess";
@@ -1117,12 +1194,14 @@ function setSetupView(view) {
 function createRoom() {
     currentPassword = document.getElementById('roomPass').value; tempName = document.getElementById('uName').value;
     if (!currentPassword) return alert("Enter password.");
+    try { localStorage.setItem("chessSession", JSON.stringify({ password: currentPassword, name: tempName })); } catch (_) {}
     socket.emit("create-room", { password: currentPassword, name: tempName, mins: document.getElementById('tMin').value, secs: document.getElementById('tSec').value, inc: document.getElementById('tInc').value, colorPref: document.getElementById('colorPref').value });
 }
 
 function joinRoom() {
     currentPassword = document.getElementById('joinPass').value; tempName = document.getElementById('joinName').value;
     if (!currentPassword) return alert("Enter password.");
+    try { localStorage.setItem("chessSession", JSON.stringify({ password: currentPassword, name: tempName })); } catch (_) {}
     socket.emit("join-attempt", { password: currentPassword });
 }
 

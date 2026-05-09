@@ -40,6 +40,7 @@ let increment;
 let moveHistory = [];
 let rematchRequested = false;
 let gameSettings = null;
+let currentVariant = "standard";
 let positionCounts = {};
 let halfmoveClock = 0;
 let lastMoveHighlight = null;
@@ -57,6 +58,7 @@ socket.on("player-assignment", (data) => {
     isSpectator = false;
     myColor = data.color;
     gameSettings = data.settings;
+    currentVariant = data.settings?.variant || "standard";
     boardPerspective = myColor;
     spectatorRoster = [];
     spectatorId = null;
@@ -121,6 +123,7 @@ socket.on("preview-settings", (data) => {
         <h2 style="color: #779556">Join Room?</h2>
         <div style="text-align: left; margin-bottom: 20px; background: #1a1a1a; padding: 15px; border-radius: 8px;">
             <p style="margin: 5px 0;"><strong>Host:</strong> ${data.creatorName}</p>
+            <p style="margin: 5px 0;"><strong>Variant:</strong> ${(s.variant || "standard").toUpperCase()}</p>
             <p style="margin: 5px 0;"><strong>Time:</strong> ${s.mins}m ${s.secs}s</p>
             <p style="margin: 5px 0;"><strong>Increment:</strong> ${s.inc}s</p>
             <p style="margin: 5px 0;"><strong>Your Side:</strong> ${displayColor}</p>
@@ -705,6 +708,7 @@ function isSquareAttacked(r, c, attackerTeam, board) {
         for (let j = 0; j < 8; j++) {
             const piece = board[i][j];
             if (piece !== '' && getTeam(piece) === attackerTeam) {
+                if (currentVariant === "atomic" && (piece === '♔' || piece === '♚')) continue;
                 if (canAttackSquare(i, j, r, c, piece, board)) return true;
             }
         }
@@ -726,6 +730,7 @@ function isTeamInCheck(team, board) {
 
 function isMoveLegal(fromR, fromC, toR, toC, team) {
     const piece = boardState[fromR][fromC];
+    if (currentVariant === "atomic" && (piece === '♔' || piece === '♚') && boardState[toR][toC] !== '') return false;
     if (!canMoveTo(fromR, fromC, toR, toC, piece, boardState)) return false;
     if ((piece === '♔' || piece === '♚') && Math.abs(toC - fromC) === 2) {
         const enemy = team === 'white' ? 'black' : 'white';
@@ -737,6 +742,10 @@ function isMoveLegal(fromR, fromC, toR, toC, team) {
     nextBoard[toR][toC] = piece;
     nextBoard[fromR][fromC] = '';
     if ((piece === '♙' || piece === '♟') && enPassantTarget && enPassantTarget.r === toR && enPassantTarget.c === toC) nextBoard[fromR][toC] = '';
+    if (currentVariant === "atomic" && (boardState[toR][toC] !== '' || ((piece === '♙' || piece === '♟') && enPassantTarget && enPassantTarget.r === toR && enPassantTarget.c === toC))) {
+        applyAtomicExplosion(nextBoard, toR, toC);
+    }
+    if (currentVariant === "atomic" && !getKingPos(team, nextBoard)) return false;
     return !isTeamInCheck(team, nextBoard);
 }
 
@@ -819,6 +828,9 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
     hasMoved[`${from.r},${from.c}`] = true;
     lastMoveHighlight = { from: { r: from.r, c: from.c }, to: { r: to.r, c: to.c } };
     boardState[to.r][to.c] = movingPiece; boardState[from.r][from.c] = '';
+    if (currentVariant === "atomic" && (targetPiece !== '' || isEP)) {
+        applyAtomicExplosion(boardState, to.r, to.c);
+    }
     let promotedTo = null;
     if (movingPiece === '♙' && to.r === 0) {
         promotedTo = promotionChoice || '♕';
@@ -833,7 +845,9 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
     halfmoveClock = (isPawnMove || isCapture) ? 0 : (halfmoveClock + 1);
     if (!isInfinite && isLocal) { if (team === 'white') whiteTime += increment; else blackTime += increment; }
     enPassantTarget = (movingPiece === '♙' || movingPiece === '♟') && Math.abs(from.r - to.r) === 2 ? { r: (from.r + to.r) / 2, c: to.c } : null;
-    currentTurn = (team === 'white' ? 'black' : 'white');
+            <button class="start-btn" onclick="setSetupView('chess-menu')">Play Chess</button>
+            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('atomic-menu')">Play Atomic Chess</button>
+            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('coup-menu')">Play Coup</button>
     const positionKey = getPositionKey();
     positionCounts[positionKey] = (positionCounts[positionKey] || 0) + 1;
     const nextMoves = getLegalMoves(currentTurn); const inCheck = isTeamInCheck(currentTurn, boardState);
@@ -1066,6 +1080,7 @@ function renderSetupCard() {
             <h1 style="color:#779556; margin-top:0;">Choose a Game</h1>
             <p style="color:#bababa; margin-bottom:20px;">Select what you want to play.</p>
             <button class="start-btn" onclick="setSetupView('chess-menu')">Play Chess</button>
+            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('atomic-menu')">Play Atomic Chess</button>
             <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('coup-menu')">Play Coup</button>
         `;
         return;
@@ -1176,6 +1191,22 @@ function renderSetupCard() {
     }
 }
 
+function applyAtomicExplosion(board, r, c) {
+    const splash = [];
+    for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+            const rr = r + dr, cc = c + dc;
+            if (rr < 0 || rr > 7 || cc < 0 || cc > 7) continue;
+            const piece = board[rr][cc];
+            if (!piece) continue;
+            const isPawn = piece === '♙' || piece === '♟';
+            if (isPawn && !(rr === r && cc === c)) continue;
+            splash.push([rr, cc]);
+        }
+    }
+    splash.forEach(([rr, cc]) => { board[rr][cc] = ''; });
+}
+
 function getPieceTextureClass(piece) {
     const map = {
         '♔': 'white-king', '♕': 'white-queen', '♖': 'white-rook', '♗': 'white-bishop', '♘': 'white-knight', '♙': 'white-pawn',
@@ -1183,18 +1214,19 @@ function getPieceTextureClass(piece) {
     };
     return map[piece] || '';
 }
-
 function setSetupView(view) {
     setupView = view;
     if (view.startsWith("chess-")) selectedGame = "chess";
+    if (view.startsWith("atomic-")) selectedGame = "atomic";
     if (view.startsWith("coup-")) selectedGame = "coup";
     renderSetupCard();
 }
 
-function createRoom() {
+function createRoom(variant = "standard") {
     currentPassword = document.getElementById('roomPass').value; tempName = document.getElementById('uName').value;
     if (!currentPassword) return alert("Enter password.");
     try { localStorage.setItem("chessSession", JSON.stringify({ password: currentPassword, name: tempName })); } catch (_) {}
+    socket.emit("create-room", { password: currentPassword, name: tempName, mins: document.getElementById('tMin').value, secs: document.getElementById('tSec').value, inc: document.getElementById('tInc').value, colorPref: document.getElementById('colorPref').value, variant });
     socket.emit("create-room", { password: currentPassword, name: tempName, mins: document.getElementById('tMin').value, secs: document.getElementById('tSec').value, inc: document.getElementById('tInc').value, colorPref: document.getElementById('colorPref').value });
 }
 
@@ -1615,10 +1647,18 @@ function showRulesPopup() {
     overlay.style.alignItems = 'center';
     overlay.style.justifyContent = 'center';
     overlay.style.zIndex = '2500';
-
+    const atomic = selectedGame === "atomic" || currentVariant === "atomic";
     overlay.innerHTML = `
         <div class="result-card" style="max-width:420px; width:90%; text-align:left;">
-            <h2 style="text-align:center;">Game Rules</h2>
+            <h2 style="text-align:center;">${atomic ? "Atomic Chess Rules" : "Game Rules"}</h2>
+            ${atomic ? `
+            <ul style="padding-left:18px; line-height:1.5; color:#ddd; font-size:14px;">
+                <li>Every capture causes an explosion on the destination square and adjacent squares.</li>
+                <li>Pawns are immune to splash unless they are the capturing/captured piece.</li>
+                <li>Kings cannot capture in Atomic Chess.</li>
+                <li>You win by exploding the opponent king; if both kings explode, it's a draw.</li>
+                <li>Standard movement, castling, and en passant rules apply otherwise.</li>
+            </ul>` : `
             <ul style="padding-left:18px; line-height:1.5; color:#ddd; font-size:14px;">
                 <li>Standard chess movement rules apply to all pieces.</li>
                 <li>Win by checkmate, resignation, or opponent running out of time.</li>
@@ -1626,9 +1666,10 @@ function showRulesPopup() {
                 <li>Each move may add increment seconds if set in game settings.</li>
                 <li>Use chat for communication during games.</li>
                 <li>For further detail/clarification, go to wikipedia.org/wiki/Rules_of_chess.</li>
-            </ul>
+            </ul>`}
             <button class="action-btn" style="width:100%; margin-top:10px;" onclick="closeRulesPopup()">Close</button>
         </div>
+    `;
     `;
     document.body.appendChild(overlay);
 }
@@ -1689,7 +1730,6 @@ function showResultModal(text) {
 }
 
 function requestRematch() {
-    const btn = document.getElementById('rematch-btn');
     if (rematchRequested) {
         rematchRequested = false;
         btn.innerText = "Request Rematch";
@@ -1715,3 +1755,36 @@ window.onload = () => {
     setupView = "game-select";
     showSetup();
 };
+    if (setupView === "atomic-menu") {
+        content.innerHTML = `
+            <h1 style="color:#779556; margin-top:0;">Atomic Chess</h1>
+            <p style="color:#bababa; margin-bottom:20px;">Choose an option</p>
+            <button class="start-btn" onclick="setSetupView('atomic-create')">Create New Game</button>
+            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('atomic-join')">Join Game</button>
+            <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showRulesPopup()">Game Rules</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('game-select')">Play a Different Game</button>
+        `;
+        return;
+    }
+    if (setupView === "atomic-create") {
+        content.innerHTML = `
+            <h2 style="color:#779556; margin-top:0;">Create Atomic Game</h2>
+            <div class="input-group"><label>Room Password</label><input id="roomPass" placeholder="Secret Code"></div>
+            <div class="input-group"><label>Your Name</label><input id="uName" value="Player 1"></div>
+            <div class="input-group"><label>Time Control</label><div style="display:flex; gap:5px;"><input type="number" id="tMin" value="3"><input type="number" id="tSec" value="0"><input type="number" id="tInc" value="2"></div></div>
+            <div class="input-group"><label>Play As</label><select id="colorPref"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
+            <button class="start-btn" onclick="createRoom('atomic')">CREATE</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('atomic-menu')">Return to Menu</button>
+        `;
+        return;
+    }
+    if (setupView === "atomic-join") {
+        content.innerHTML = `
+            <h2 style="color:#779556; margin-top:0;">Join Atomic Game</h2>
+            <div class="input-group"><label>Room Password</label><input id="joinPass" placeholder="Enter Password"></div>
+            <div class="input-group"><label>Your Name</label><input id="joinName" value="Player 2"></div>
+            <button class="start-btn" onclick="joinRoom()">FIND ROOM</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('atomic-menu')">Return to Menu</button>
+        `;
+        return;
+    }

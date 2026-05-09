@@ -164,7 +164,7 @@ function buildActiveGames() {
 
 io.on("connection", (socket) => {
     socket.on("create-room", (data) => {
-        const { password, name, mins, secs, inc, colorPref } = data;
+        const { password, name, mins, secs, inc, colorPref, variant } = data;
         if (rooms[password]) {
             socket.emit("error-msg", "Room password already in use.");
             return;
@@ -173,7 +173,7 @@ io.on("connection", (socket) => {
         rooms[password] = {
             creatorId: socket.id,
             creatorName: name,
-            settings: { mins, secs, inc, colorPref },
+            settings: { mins, secs, inc, colorPref, variant: variant === "atomic" ? "atomic" : "standard" },
             status: "waiting",
             players: { white: null, black: null, whiteName: null, blackName: null, whiteAdmin: false, blackAdmin: false },
             spectators: {},

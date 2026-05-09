@@ -57,8 +57,8 @@ socket.on("player-assignment", (data) => {
     isAdmin = false;
     isSpectator = false;
     myColor = data.color;
-    gameSettings = data.settings;
-    currentVariant = data.settings?.variant || "standard";
+            <p style="margin: 5px 0;"><strong>Variant:</strong> ${(s.variant || "standard").toUpperCase()}</p>
+            <p style="margin: 5px 0;"><strong>Time:</strong> ${s.mins}m ${s.secs}s</p>
     boardPerspective = myColor;
     spectatorRoster = [];
     spectatorId = null;
@@ -845,9 +845,26 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
     halfmoveClock = (isPawnMove || isCapture) ? 0 : (halfmoveClock + 1);
     if (!isInfinite && isLocal) { if (team === 'white') whiteTime += increment; else blackTime += increment; }
     enPassantTarget = (movingPiece === '♙' || movingPiece === '♟') && Math.abs(from.r - to.r) === 2 ? { r: (from.r + to.r) / 2, c: to.c } : null;
-            <button class="start-btn" onclick="setSetupView('chess-menu')">Play Chess</button>
-            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('atomic-menu')">Play Atomic Chess</button>
-            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('coup-menu')">Play Coup</button>
+    currentTurn = (team === 'white' ? 'black' : 'white');
+    if (currentVariant === "atomic") {
+        const whiteKingAlive = !!getKingPos('white', boardState);
+        const blackKingAlive = !!getKingPos('black', boardState);
+        if (!whiteKingAlive && !blackKingAlive) {
+            isGameOver = true;
+            if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
+            showResultModal("DRAW - BOTH KINGS EXPLODED");
+            render("DRAW - BOTH KINGS EXPLODED");
+            return;
+        }
+        if (!whiteKingAlive || !blackKingAlive) {
+            const winner = whiteKingAlive ? "WHITE" : "BLACK";
+            isGameOver = true;
+            if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
+            showResultModal(`${winner} WINS BY ATOMIC EXPLOSION`);
+            render(`${winner} WINS BY ATOMIC EXPLOSION`);
+            return;
+        }
+    }
     const positionKey = getPositionKey();
     positionCounts[positionKey] = (positionCounts[positionKey] || 0) + 1;
     const nextMoves = getLegalMoves(currentTurn); const inCheck = isTeamInCheck(currentTurn, boardState);
@@ -1214,6 +1231,7 @@ function getPieceTextureClass(piece) {
     };
     return map[piece] || '';
 }
+
 function setSetupView(view) {
     setupView = view;
     if (view.startsWith("chess-")) selectedGame = "chess";
@@ -1227,7 +1245,6 @@ function createRoom(variant = "standard") {
     if (!currentPassword) return alert("Enter password.");
     try { localStorage.setItem("chessSession", JSON.stringify({ password: currentPassword, name: tempName })); } catch (_) {}
     socket.emit("create-room", { password: currentPassword, name: tempName, mins: document.getElementById('tMin').value, secs: document.getElementById('tSec').value, inc: document.getElementById('tInc').value, colorPref: document.getElementById('colorPref').value, variant });
-    socket.emit("create-room", { password: currentPassword, name: tempName, mins: document.getElementById('tMin').value, secs: document.getElementById('tSec').value, inc: document.getElementById('tInc').value, colorPref: document.getElementById('colorPref').value });
 }
 
 function joinRoom() {
@@ -1670,7 +1687,6 @@ function showRulesPopup() {
             <button class="action-btn" style="width:100%; margin-top:10px;" onclick="closeRulesPopup()">Close</button>
         </div>
     `;
-    `;
     document.body.appendChild(overlay);
 }
 
@@ -1730,6 +1746,7 @@ function showResultModal(text) {
 }
 
 function requestRematch() {
+    const btn = document.getElementById('rematch-btn');
     if (rematchRequested) {
         rematchRequested = false;
         btn.innerText = "Request Rematch";

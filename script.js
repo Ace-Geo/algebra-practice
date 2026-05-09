@@ -746,6 +746,10 @@ function isMoveLegal(fromR, fromC, toR, toC, team) {
         applyAtomicExplosion(nextBoard, toR, toC);
     }
     if (currentVariant === "atomic" && !getKingPos(team, nextBoard)) return false;
+    if (currentVariant === "atomic") {
+        const enemy = team === "white" ? "black" : "white";
+        if (!getKingPos(enemy, nextBoard)) return true;
+    }
     return !isTeamInCheck(team, nextBoard);
 }
 
@@ -850,6 +854,7 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
         const whiteKingAlive = !!getKingPos('white', boardState);
         const blackKingAlive = !!getKingPos('black', boardState);
         if (!whiteKingAlive && !blackKingAlive) {
+            if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
             isGameOver = true;
             if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
             showResultModal("DRAW - BOTH KINGS EXPLODED");
@@ -858,6 +863,7 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
         }
         if (!whiteKingAlive || !blackKingAlive) {
             const winner = whiteKingAlive ? "WHITE" : "BLACK";
+            if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
             isGameOver = true;
             if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
             showResultModal(`${winner} WINS BY ATOMIC EXPLOSION`);
@@ -1747,6 +1753,7 @@ function showRulesPopup() {
                 <li>Pawns are immune to splash unless they are the capturing/captured piece.</li>
                 <li>Kings cannot capture in Atomic Chess.</li>
                 <li>You win by exploding the opponent king; if both kings explode, it's a draw.</li>
+                <li>If your move explodes the opponent king, that winning move is legal even when you are currently in check.</li>
                 <li>Standard movement, castling, and en passant rules apply otherwise.</li>
             </ul>` : `
             <ul style="padding-left:18px; line-height:1.5; color:#ddd; font-size:14px;">

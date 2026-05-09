@@ -44,6 +44,9 @@ let currentVariant = "standard";
 let positionCounts = {};
 let halfmoveClock = 0;
 let lastMoveHighlight = null;
+let isBotGame = false;
+let botColor = null;
+let botElo = 1200;
 
 // --- ADMIN & COMMAND STATE ---
 let isAdmin = false;
@@ -854,7 +857,7 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
         const whiteKingAlive = !!getKingPos('white', boardState);
         const blackKingAlive = !!getKingPos('black', boardState);
         if (!whiteKingAlive && !blackKingAlive) {
-            if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
+            if (isLocal && !isBotGame) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
             isGameOver = true;
             if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
             showResultModal("DRAW - BOTH KINGS EXPLODED");
@@ -863,7 +866,7 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
         }
         if (!whiteKingAlive || !blackKingAlive) {
             const winner = whiteKingAlive ? "WHITE" : "BLACK";
-            if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
+            if (isLocal && !isBotGame) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
             isGameOver = true;
             if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
             showResultModal(`${winner} WINS BY ATOMIC EXPLOSION`);
@@ -899,8 +902,23 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
     if (team === 'white') moveHistory.push({ w: notation, b: '' });
     else if (moveHistory.length > 0) moveHistory[moveHistory.length - 1].b = notation;
     selected = null;
-    if (isLocal) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
+    if (isLocal && !isBotGame) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
+    if (isLocal && isBotGame && !isGameOver && currentTurn === botColor) {
+        setTimeout(makeBotMove, 350);
+    }
     render(forcedStatus);
+}
+
+function makeBotMove() {
+    if (!isBotGame || isGameOver || currentTurn !== botColor) return;
+    const legal = getLegalMoves(botColor);
+    if (!legal.length) return;
+    let move = legal[Math.floor(Math.random() * legal.length)];
+    if (botElo >= 1200) {
+        const captures = legal.filter((m) => boardState[m.to.r][m.to.c] !== '');
+        if (captures.length) move = captures[Math.floor(Math.random() * captures.length)];
+    }
+    handleActualMove(move.from, move.to, false, null);
 }
 
 function render(forcedStatus) {
@@ -1117,6 +1135,7 @@ function renderSetupCard() {
             <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('chess-join')">Join Game</button>
             <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showRulesPopup()">Game Rules</button>
             ${lobbySpectateEnabled ? '<button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="openSpectateMenu()">Spectate Games</button>' : ''}
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="startBotGameSetup('standard')">Play vs Bot</button>
             <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('game-select')">Play a Different Game</button>
         `;
         return;
@@ -1146,41 +1165,6 @@ function renderSetupCard() {
         return;
     }
 
-    if (setupView === "atomic-menu") {
-        content.innerHTML = `
-            <h1 style="color:#779556; margin-top:0;">Atomic Chess</h1>
-            <p style="color:#bababa; margin-bottom:20px;">Choose an option</p>
-            <button class="start-btn" onclick="setSetupView('atomic-create')">Create New Game</button>
-            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('atomic-join')">Join Game</button>
-            <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showRulesPopup()">Game Rules</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('game-select')">Play a Different Game</button>
-        `;
-        return;
-    }
-
-    if (setupView === "atomic-create") {
-        content.innerHTML = `
-            <h2 style="color:#779556; margin-top:0;">Create Atomic Game</h2>
-            <div class="input-group"><label>Room Password</label><input id="roomPass" placeholder="Secret Code"></div>
-            <div class="input-group"><label>Your Name</label><input id="uName" value="Player 1"></div>
-            <div class="input-group"><label>Time Control</label><div style="display:flex; gap:5px;"><input type="number" id="tMin" value="3"><input type="number" id="tSec" value="0"><input type="number" id="tInc" value="2"></div></div>
-            <div class="input-group"><label>Play As</label><select id="colorPref"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
-            <button class="start-btn" onclick="createRoom('atomic')">CREATE</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('atomic-menu')">Return to Menu</button>
-        `;
-        return;
-    }
-
-    if (setupView === "atomic-join") {
-        content.innerHTML = `
-            <h2 style="color:#779556; margin-top:0;">Join Atomic Game</h2>
-            <div class="input-group"><label>Room Password</label><input id="joinPass" placeholder="Enter Password"></div>
-            <div class="input-group"><label>Your Name</label><input id="joinName" value="Player 2"></div>
-            <button class="start-btn" onclick="joinRoom()">FIND ROOM</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('atomic-menu')">Return to Menu</button>
-        `;
-        return;
-    }
 
     if (setupView === "coup-menu") {
         content.innerHTML = `
@@ -1287,6 +1271,25 @@ function createRoom(variant = "standard") {
     if (!currentPassword) return alert("Enter password.");
     try { localStorage.setItem("chessSession", JSON.stringify({ password: currentPassword, name: tempName })); } catch (_) {}
     socket.emit("create-room", { password: currentPassword, name: tempName, mins: document.getElementById('tMin').value, secs: document.getElementById('tSec').value, inc: document.getElementById('tInc').value, colorPref: document.getElementById('colorPref').value, variant });
+}
+
+function startBotGameSetup(variant = "standard") {
+    const eloInput = parseInt(prompt("Bot Elo (400-2400):", "1200") || "1200", 10);
+    const playAs = ((prompt("Play as white or black?", "white") || "white").toLowerCase() === "black") ? "black" : "white";
+    botElo = Number.isNaN(eloInput) ? 1200 : Math.max(400, Math.min(2400, eloInput));
+    isBotGame = true;
+    botColor = playAs === "white" ? "black" : "white";
+    myColor = playAs;
+    isSpectator = false;
+    currentVariant = variant === "atomic" ? "atomic" : "standard";
+    gameSettings = currentVariant === "atomic"
+        ? { mins: 3, secs: 0, inc: 2, variant: "atomic" }
+        : { mins: 10, secs: 0, inc: 0, variant: "standard" };
+    whiteName = playAs === "white" ? "You" : `Bot (${botElo})`;
+    blackName = playAs === "black" ? "You" : `Bot (${botElo})`;
+    const overlay = document.getElementById('setup-overlay');
+    if (overlay) overlay.remove();
+    initGameState();
 }
 
 function joinRoom() {
@@ -1506,6 +1509,8 @@ function renderCoupPrompt(pending) {
             <button class="start-btn" onclick="setSetupView('atomic-create')">Create New Game</button>
             <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('atomic-join')">Join Game</button>
             <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showRulesPopup()">Game Rules</button>
+            ${lobbySpectateEnabled ? '<button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="openSpectateMenu()">Spectate Games</button>' : ''}
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="startBotGameSetup('atomic')">Play vs Bot</button>
             <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('game-select')">Play a Different Game</button>
         `;
         return;

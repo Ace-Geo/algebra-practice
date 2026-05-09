@@ -47,6 +47,9 @@ let lastMoveHighlight = null;
 let isBotGame = false;
 let botColor = null;
 let botElo = 1200;
+let pendingBotVariant = "standard";
+let botPlayAsChoice = "random";
+let botEngineWorker = null;
 
 // --- ADMIN & COMMAND STATE ---
 let isAdmin = false;
@@ -911,14 +914,101 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
 
 function makeBotMove() {
     if (!isBotGame || isGameOver || currentTurn !== botColor) return;
+    if (currentVariant === "atomic") {
+        makeAtomicBotMove();
+        return;
+    }
     const legal = getLegalMoves(botColor);
     if (!legal.length) return;
-    let move = legal[Math.floor(Math.random() * legal.length)];
-    if (botElo >= 1200) {
-        const captures = legal.filter((m) => boardState[m.to.r][m.to.c] !== '');
-        if (captures.length) move = captures[Math.floor(Math.random() * captures.length)];
-    }
+    const move = legal[Math.floor(Math.random() * legal.length)];
     handleActualMove(move.from, move.to, false, null);
+}
+
+function makeAtomicBotMove() {
+    const legal = getLegalMoves(botColor);
+    if (!legal.length) return;
+    const fallback = () => {
+        const mv = legal[Math.floor(Math.random() * legal.length)];
+        handleActualMove(mv.from, mv.to, false, null);
+    };
+    ensureFairyStockfishWorker().then((worker) => {
+        if (!worker) return fallback();
+        requestAtomicEngineMove(worker).then((uciMove) => {
+            const parsed = parseUciMove(uciMove);
+            if (!parsed) return fallback();
+            const found = legal.find((m) => m.from.r === parsed.from.r && m.from.c === parsed.from.c && m.to.r === parsed.to.r && m.to.c === parsed.to.c);
+            if (!found) return fallback();
+            handleActualMove(found.from, found.to, false, null);
+        }).catch(fallback);
+    });
+}
+
+function ensureFairyStockfishWorker() {
+    if (botEngineWorker) return Promise.resolve(botEngineWorker);
+    try {
+        botEngineWorker = new Worker('https://cdn.jsdelivr.net/npm/fairy-stockfish@16.1.0/src/ffish.js');
+        return Promise.resolve(botEngineWorker);
+    } catch (_) {
+        return Promise.resolve(null);
+    }
+}
+
+function requestAtomicEngineMove(worker) {
+    return new Promise((resolve, reject) => {
+        const fen = boardToFen(boardState, currentTurn);
+        let finished = false;
+        const onMsg = (e) => {
+            const line = String(e.data || '');
+            if (!line.startsWith('bestmove')) return;
+            finished = true;
+            worker.removeEventListener('message', onMsg);
+            const mv = line.split(/\s+/)[1];
+            if (!mv || mv === '(none)') reject(new Error('no move'));
+            else resolve(mv);
+        };
+        worker.addEventListener('message', onMsg);
+        worker.postMessage('uci');
+        worker.postMessage('setoption name UCI_Variant value atomic');
+        worker.postMessage(`setoption name UCI_Elo value ${botElo}`);
+        worker.postMessage('isready');
+        worker.postMessage(`position fen ${fen}`);
+        worker.postMessage('go depth 8');
+        setTimeout(() => {
+            if (finished) return;
+            worker.removeEventListener('message', onMsg);
+            reject(new Error('timeout'));
+        }, 3000);
+    });
+}
+
+function parseUciMove(move) {
+    if (!move || move.length < 4) return null;
+    const files = 'abcdefgh';
+    const fromC = files.indexOf(move[0]);
+    const toC = files.indexOf(move[2]);
+    const fromR = 8 - Number(move[1]);
+    const toR = 8 - Number(move[3]);
+    if (fromC < 0 || toC < 0 || Number.isNaN(fromR) || Number.isNaN(toR)) return null;
+    return { from: { r: fromR, c: fromC }, to: { r: toR, c: toC } };
+}
+
+function boardToFen(board, turn) {
+    const map = { '♔': 'K', '♕': 'Q', '♖': 'R', '♗': 'B', '♘': 'N', '♙': 'P', '♚': 'k', '♛': 'q', '♜': 'r', '♝': 'b', '♞': 'n', '♟': 'p' };
+    const ranks = board.map((row) => {
+        let out = '';
+        let empty = 0;
+        row.forEach((piece) => {
+            if (!piece) empty++;
+            else {
+                if (empty) out += empty;
+                empty = 0;
+                out += map[piece] || '';
+            }
+        });
+        if (empty) out += empty;
+        return out;
+    });
+    return `${ranks.join('/')} ${turn === 'white' ? 'w' : 'b'} - - 0 1`;
 }
 
 function render(forcedStatus) {
@@ -1274,19 +1364,25 @@ function createRoom(variant = "standard") {
 }
 
 function startBotGameSetup(variant = "standard") {
-    const eloInput = parseInt(prompt("Bot Elo (400-2400):", "1200") || "1200", 10);
-    const playAs = ((prompt("Play as white or black?", "white") || "white").toLowerCase() === "black") ? "black" : "white";
-    botElo = Number.isNaN(eloInput) ? 1200 : Math.max(400, Math.min(2400, eloInput));
+    pendingBotVariant = variant === "atomic" ? "atomic" : "standard";
+    setSetupView(pendingBotVariant === "atomic" ? "atomic-bot-setup" : "chess-bot-setup");
+}
+
+function startBotGameFromSetup() {
+    const eloRaw = parseInt(document.getElementById('botEloInput')?.value || "1000", 10);
+    const colorSel = (document.getElementById('botColorSelect')?.value || "random").toLowerCase();
+    botElo = Number.isNaN(eloRaw) ? 1000 : Math.max(400, Math.min(3000, eloRaw));
+    botPlayAsChoice = ["white", "black", "random"].includes(colorSel) ? colorSel : "random";
+    const playAs = botPlayAsChoice === "random" ? (Math.random() < 0.5 ? "white" : "black") : botPlayAsChoice;
     isBotGame = true;
     botColor = playAs === "white" ? "black" : "white";
     myColor = playAs;
     isSpectator = false;
-    currentVariant = variant === "atomic" ? "atomic" : "standard";
-    gameSettings = currentVariant === "atomic"
-        ? { mins: 3, secs: 0, inc: 2, variant: "atomic" }
-        : { mins: 10, secs: 0, inc: 0, variant: "standard" };
-    whiteName = playAs === "white" ? "You" : `Bot (${botElo})`;
-    blackName = playAs === "black" ? "You" : `Bot (${botElo})`;
+    currentVariant = pendingBotVariant === "atomic" ? "atomic" : "standard";
+    gameSettings = currentVariant === "atomic" ? { mins: 3, secs: 0, inc: 2, variant: "atomic" } : { mins: 10, secs: 0, inc: 0, variant: "standard" };
+    const botLabel = currentVariant === "atomic" ? `Fairy Bot (${botElo})` : `Bot (${botElo})`;
+    whiteName = playAs === "white" ? "You" : botLabel;
+    blackName = playAs === "black" ? "You" : botLabel;
     const overlay = document.getElementById('setup-overlay');
     if (overlay) overlay.remove();
     initGameState();
@@ -1498,6 +1594,19 @@ function renderCoupPrompt(pending) {
                     <button class="accept-btn" onclick="sendCoupResponse('pass')">${allowLabel}</button>
                 </div>
             </div>
+        `;
+        return;
+    }
+
+
+    if (setupView === "chess-bot-setup" || setupView === "atomic-bot-setup") {
+        const isAtomic = setupView === "atomic-bot-setup";
+        content.innerHTML = `
+            <h2 style="color:#779556; margin-top:0;">${isAtomic ? "Atomic" : "Chess"} Bot Setup</h2>
+            <div class="input-group"><label>Bot Elo</label><input type="number" id="botEloInput" min="400" max="3000" value="1000"></div>
+            <div class="input-group"><label>Play As</label><select id="botColorSelect"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
+            <button class="start-btn" onclick="startBotGameFromSetup()">START GAME</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('${isAtomic ? "atomic-menu" : "chess-menu"}')">Return to Menu</button>
         `;
         return;
     }

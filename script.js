@@ -962,7 +962,7 @@ function makeEngineBotMove(variant) {
             }
             handleActualMove(found.from, found.to, false, null);
         }).catch(() => {
-            appendChatMessage("System", "Engine could not provide a move.", true);
+            appendChatMessage("System", "Engine is still thinking; please wait a moment and try again if needed.", true);
         });
     });
 }
@@ -1045,10 +1045,8 @@ function requestEngineMove(worker, variant) {
         const fen = boardToFen(boardState, currentTurn);
         let settled = false;
         let stopTimer = null;
-        let failSafeTimer = null;
         const cleanup = () => {
             if (stopTimer) clearTimeout(stopTimer);
-            if (failSafeTimer) clearTimeout(failSafeTimer);
             worker.removeEventListener('message', onMsg);
         };
         const onMsg = (e) => {
@@ -1076,14 +1074,10 @@ function requestEngineMove(worker, variant) {
 
         stopTimer = setTimeout(() => {
             try { worker.postMessage('stop'); } catch (_) {}
+            setTimeout(() => {
+                try { worker.postMessage('stop'); } catch (_) {}
+            }, 2500);
         }, 5000);
-
-        failSafeTimer = setTimeout(() => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            reject(new Error('engine did not return bestmove'));
-        }, 7000);
     });
 }
 

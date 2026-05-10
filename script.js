@@ -1043,16 +1043,25 @@ function ensureFairyStockfishWorker() {
 function requestEngineMove(worker, variant) {
     return new Promise((resolve, reject) => {
         const fen = boardToFen(boardState, currentTurn);
-        let finished = false;
+        let settled = false;
+        let stopTimer = null;
+        let failSafeTimer = null;
+        const cleanup = () => {
+            if (stopTimer) clearTimeout(stopTimer);
+            if (failSafeTimer) clearTimeout(failSafeTimer);
+            worker.removeEventListener('message', onMsg);
+        };
         const onMsg = (e) => {
             const line = String(e.data || '');
             if (!line.startsWith('bestmove')) return;
-            finished = true;
-            worker.removeEventListener('message', onMsg);
+            if (settled) return;
+            settled = true;
+            cleanup();
             const mv = line.split(/\s+/)[1];
             if (!mv || mv === '(none)') reject(new Error('no move'));
             else resolve(mv);
         };
+
         worker.addEventListener('message', onMsg);
         worker.postMessage('uci');
         if (variant === 'atomic') worker.postMessage('setoption name UCI_Variant value atomic');
@@ -1063,7 +1072,18 @@ function requestEngineMove(worker, variant) {
         worker.postMessage(`setoption name Skill Level value ${skill}`);
         worker.postMessage('isready');
         worker.postMessage(`position fen ${fen}`);
-        worker.postMessage('go depth 16');
+        worker.postMessage('go infinite');
+
+        stopTimer = setTimeout(() => {
+            try { worker.postMessage('stop'); } catch (_) {}
+        }, 5000);
+
+        failSafeTimer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error('engine did not return bestmove'));
+        }, 7000);
     });
 }
 

@@ -970,12 +970,19 @@ function makeEngineBotMove(variant) {
 async function ensureStockfishWorker() {
     if (standardBotWorker) return standardBotWorker;
     const urls = [
+        'https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.asm.js',
+        'https://unpkg.com/stockfish.js@10.0.2/stockfish.asm.js',
         'https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js',
         'https://unpkg.com/stockfish.js@10.0.2/stockfish.js'
     ];
     for (const url of urls) {
         try {
             const worker = new Worker(url);
+            const ok = await probeEngineWorker(worker);
+            if (!ok) {
+                try { worker.terminate(); } catch (_) {}
+                continue;
+            }
             standardBotWorker = worker;
             return standardBotWorker;
         } catch (_) {
@@ -983,6 +990,37 @@ async function ensureStockfishWorker() {
         }
     }
     return null;
+}
+
+
+function probeEngineWorker(worker) {
+    return new Promise((resolve) => {
+        let done = false;
+        const t = setTimeout(() => {
+            if (done) return;
+            done = true;
+            worker.removeEventListener('message', onMsg);
+            resolve(false);
+        }, 1500);
+        const onMsg = (e) => {
+            const line = String(e.data || '');
+            if (!/uciok|readyok|Stockfish/i.test(line)) return;
+            if (done) return;
+            done = true;
+            clearTimeout(t);
+            worker.removeEventListener('message', onMsg);
+            resolve(true);
+        };
+        worker.addEventListener('message', onMsg);
+        try {
+            worker.postMessage('uci');
+            worker.postMessage('isready');
+        } catch (_) {
+            clearTimeout(t);
+            worker.removeEventListener('message', onMsg);
+            resolve(false);
+        }
+    });
 }
 
 function ensureFairyStockfishWorker() {

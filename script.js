@@ -943,20 +943,27 @@ function makeBotMove() {
 function makeEngineBotMove(variant) {
     const legal = getLegalMoves(botColor);
     if (!legal.length) return;
-    const fallback = () => {
-        const mv = legal[Math.floor(Math.random() * legal.length)];
-        handleActualMove(mv.from, mv.to, false, null);
-    };
     const workerPromise = variant === "atomic" ? ensureFairyStockfishWorker() : ensureStockfishWorker();
     workerPromise.then((worker) => {
-        if (!worker) return fallback();
+        if (!worker) {
+            appendChatMessage("System", `Could not load ${variant === "atomic" ? "Fairy-Stockfish" : "Stockfish"}.`, true);
+            return;
+        }
         requestEngineMove(worker, variant).then((uciMove) => {
             const parsed = parseUciMove(uciMove);
-            if (!parsed) return fallback();
+            if (!parsed) {
+                appendChatMessage("System", "Engine returned an invalid move.", true);
+                return;
+            }
             const found = legal.find((m) => m.from.r === parsed.from.r && m.from.c === parsed.from.c && m.to.r === parsed.to.r && m.to.c === parsed.to.c);
-            if (!found) return fallback();
+            if (!found) {
+                appendChatMessage("System", "Engine move was not legal in current position.", true);
+                return;
+            }
             handleActualMove(found.from, found.to, false, null);
-        }).catch(fallback);
+        }).catch(() => {
+            appendChatMessage("System", "Engine timed out while choosing a move.", true);
+        });
     });
 }
 
@@ -1004,7 +1011,7 @@ function requestEngineMove(worker, variant) {
         }
         worker.postMessage('isready');
         worker.postMessage(`position fen ${fen}`);
-        worker.postMessage('go movetime 1200');
+        worker.postMessage(botElo >= 2800 ? 'go depth 18' : 'go movetime 1200');
         setTimeout(() => {
             if (finished) return;
             worker.removeEventListener('message', onMsg);

@@ -943,16 +943,10 @@ function makeBotMove() {
 function makeEngineBotMove(variant) {
     const legal = getLegalMoves(botColor);
     if (!legal.length) return;
-    const workerPromise = variant === "atomic" ? ensureFairyStockfishWorker() : ensureStockfishWorker();
-    workerPromise.then(async (worker) => {
-        if (!worker && variant === "atomic") {
-            worker = await ensureStockfishWorker();
-            if (worker) {
-                appendChatMessage("System", "Fairy-Stockfish unavailable; using Stockfish fallback for Atomic bot moves.", true);
-            }
-        }
+    const workerPromise = ensureStockfishWorker();
+    workerPromise.then((worker) => {
         if (!worker) {
-            appendChatMessage("System", `Could not load ${variant === "atomic" ? "Fairy-Stockfish or fallback Stockfish" : "Stockfish"}.`, true);
+            appendChatMessage("System", "Could not load Stockfish.", true);
             return;
         }
         requestEngineMove(worker, variant).then((uciMove) => {

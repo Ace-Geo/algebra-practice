@@ -1000,7 +1000,7 @@ async function ensureStockfishWorker() {
 }
 
 
-function probeEngineWorker(worker) {
+function probeEngineWorker(worker, timeoutMs = 6000) {
     return new Promise((resolve) => {
         let done = false;
         const t = setTimeout(() => {
@@ -1008,10 +1008,10 @@ function probeEngineWorker(worker) {
             done = true;
             worker.removeEventListener('message', onMsg);
             resolve(false);
-        }, 1500);
+        }, timeoutMs);
         const onMsg = (e) => {
             const line = String(e.data || '');
-            if (!/uciok|readyok|Stockfish/i.test(line)) return;
+            if (!/uciok|readyok|Stockfish|Fairy/i.test(line)) return;
             if (done) return;
             done = true;
             clearTimeout(t);
@@ -1038,6 +1038,18 @@ async function ensureFairyStockfishWorker() {
     ];
     for (const url of urls) {
         try {
+            const directWorker = new Worker(url);
+            const directOk = await probeEngineWorker(directWorker, 10000);
+            if (directOk) {
+                botEngineWorker = directWorker;
+                return botEngineWorker;
+            }
+            try { directWorker.terminate(); } catch (_) {}
+        } catch (_) {
+            // Try fetch/blob fallback
+        }
+
+        try {
             const response = await fetch(url, { mode: 'cors', cache: 'force-cache' });
             if (!response.ok) continue;
             const source = await response.text();
@@ -1045,7 +1057,7 @@ async function ensureFairyStockfishWorker() {
             const blob = new Blob([source], { type: 'application/javascript' });
             const blobUrl = URL.createObjectURL(blob);
             const worker = new Worker(blobUrl);
-            const ok = await probeEngineWorker(worker);
+            const ok = await probeEngineWorker(worker, 10000);
             if (!ok) {
                 try { worker.terminate(); } catch (_) {}
                 URL.revokeObjectURL(blobUrl);

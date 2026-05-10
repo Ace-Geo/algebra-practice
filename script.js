@@ -1256,6 +1256,57 @@ function renderSetupCard() {
     }
 
 
+
+    if (setupView === "chess-bot-setup" || setupView === "atomic-bot-setup") {
+        const isAtomic = setupView === "atomic-bot-setup";
+        content.innerHTML = `
+            <h2 style="color:#779556; margin-top:0;">${isAtomic ? "Atomic" : "Chess"} Bot Setup</h2>
+            <div class="input-group"><label>Bot Elo</label><input type="number" id="botEloInput" min="400" max="3000" value="1000"></div>
+            <div class="input-group"><label>Play As</label><select id="botColorSelect"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
+            <button class="start-btn" onclick="startBotGameFromSetup()">START GAME</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('${isAtomic ? "atomic-menu" : "chess-menu"}')">Return to Menu</button>
+        `;
+        return;
+    }
+
+    if (setupView === "atomic-menu") {
+        content.innerHTML = `
+            <h1 style="color:#779556; margin-top:0;">Atomic Chess</h1>
+            <p style="color:#bababa; margin-bottom:20px;">Choose an option</p>
+            <button class="start-btn" onclick="setSetupView('atomic-create')">Create New Game</button>
+            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('atomic-join')">Join Game</button>
+            <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showRulesPopup()">Game Rules</button>
+            ${lobbySpectateEnabled ? '<button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="openSpectateMenu()">Spectate Games</button>' : ''}
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="startBotGameSetup('atomic')">Play vs Bot</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('game-select')">Play a Different Game</button>
+        `;
+        return;
+    }
+
+    if (setupView === "atomic-create") {
+        content.innerHTML = `
+            <h2 style="color:#779556; margin-top:0;">Create Atomic Game</h2>
+            <div class="input-group"><label>Room Password</label><input id="roomPass" placeholder="Secret Code"></div>
+            <div class="input-group"><label>Your Name</label><input id="uName" value="Player 1"></div>
+            <div class="input-group"><label>Time Control</label><div style="display:flex; gap:5px;"><input type="number" id="tMin" value="3"><input type="number" id="tSec" value="0"><input type="number" id="tInc" value="2"></div></div>
+            <div class="input-group"><label>Play As</label><select id="colorPref"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
+            <button class="start-btn" onclick="createRoom('atomic')">CREATE</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('atomic-menu')">Return to Menu</button>
+        `;
+        return;
+    }
+
+    if (setupView === "atomic-join") {
+        content.innerHTML = `
+            <h2 style="color:#779556; margin-top:0;">Join Atomic Game</h2>
+            <div class="input-group"><label>Room Password</label><input id="joinPass" placeholder="Enter Password"></div>
+            <div class="input-group"><label>Your Name</label><input id="joinName" value="Player 2"></div>
+            <button class="start-btn" onclick="joinRoom()">FIND ROOM</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('atomic-menu')">Return to Menu</button>
+        `;
+        return;
+    }
+
     if (setupView === "coup-menu") {
         content.innerHTML = `
             <h1 style="color:#779556; margin-top:0;">Coup</h1>
@@ -1598,56 +1649,6 @@ function renderCoupPrompt(pending) {
         return;
     }
 
-
-    if (setupView === "chess-bot-setup" || setupView === "atomic-bot-setup") {
-        const isAtomic = setupView === "atomic-bot-setup";
-        content.innerHTML = `
-            <h2 style="color:#779556; margin-top:0;">${isAtomic ? "Atomic" : "Chess"} Bot Setup</h2>
-            <div class="input-group"><label>Bot Elo</label><input type="number" id="botEloInput" min="400" max="3000" value="1000"></div>
-            <div class="input-group"><label>Play As</label><select id="botColorSelect"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
-            <button class="start-btn" onclick="startBotGameFromSetup()">START GAME</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('${isAtomic ? "atomic-menu" : "chess-menu"}')">Return to Menu</button>
-        `;
-        return;
-    }
-
-    if (setupView === "atomic-menu") {
-        content.innerHTML = `
-            <h1 style="color:#779556; margin-top:0;">Atomic Chess</h1>
-            <p style="color:#bababa; margin-bottom:20px;">Choose an option</p>
-            <button class="start-btn" onclick="setSetupView('atomic-create')">Create New Game</button>
-            <button class="start-btn" style="margin-top:10px;" onclick="setSetupView('atomic-join')">Join Game</button>
-            <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showRulesPopup()">Game Rules</button>
-            ${lobbySpectateEnabled ? '<button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="openSpectateMenu()">Spectate Games</button>' : ''}
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="startBotGameSetup('atomic')">Play vs Bot</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('game-select')">Play a Different Game</button>
-        `;
-        return;
-    }
-
-    if (setupView === "atomic-create") {
-        content.innerHTML = `
-            <h2 style="color:#779556; margin-top:0;">Create Atomic Game</h2>
-            <div class="input-group"><label>Room Password</label><input id="roomPass" placeholder="Secret Code"></div>
-            <div class="input-group"><label>Your Name</label><input id="uName" value="Player 1"></div>
-            <div class="input-group"><label>Time Control</label><div style="display:flex; gap:5px;"><input type="number" id="tMin" value="3"><input type="number" id="tSec" value="0"><input type="number" id="tInc" value="2"></div></div>
-            <div class="input-group"><label>Play As</label><select id="colorPref"><option value="random">Random</option><option value="white">White</option><option value="black">Black</option></select></div>
-            <button class="start-btn" onclick="createRoom('atomic')">CREATE</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('atomic-menu')">Return to Menu</button>
-        `;
-        return;
-    }
-
-    if (setupView === "atomic-join") {
-        content.innerHTML = `
-            <h2 style="color:#779556; margin-top:0;">Join Atomic Game</h2>
-            <div class="input-group"><label>Room Password</label><input id="joinPass" placeholder="Enter Password"></div>
-            <div class="input-group"><label>Your Name</label><input id="joinName" value="Player 2"></div>
-            <button class="start-btn" onclick="joinRoom()">FIND ROOM</button>
-            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('atomic-menu')">Return to Menu</button>
-        `;
-        return;
-    }
 
     if (pending.kind === "block-offer") {
         if (socket.id !== pending.targetId) {

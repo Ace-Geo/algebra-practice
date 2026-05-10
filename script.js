@@ -967,14 +967,22 @@ function makeEngineBotMove(variant) {
     });
 }
 
-function ensureStockfishWorker() {
-    if (standardBotWorker) return Promise.resolve(standardBotWorker);
-    try {
-        standardBotWorker = new Worker('https://cdn.jsdelivr.net/npm/stockfish@16.0.0/src/stockfish-nnue-16-single.js');
-        return Promise.resolve(standardBotWorker);
-    } catch (_) {
-        return Promise.resolve(null);
+async function ensureStockfishWorker() {
+    if (standardBotWorker) return standardBotWorker;
+    const urls = [
+        'https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js',
+        'https://unpkg.com/stockfish.js@10.0.2/stockfish.js'
+    ];
+    for (const url of urls) {
+        try {
+            const worker = new Worker(url);
+            standardBotWorker = worker;
+            return standardBotWorker;
+        } catch (_) {
+            // Try next CDN
+        }
     }
+    return null;
 }
 
 function ensureFairyStockfishWorker() {

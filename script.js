@@ -1030,14 +1030,34 @@ function probeEngineWorker(worker) {
     });
 }
 
-function ensureFairyStockfishWorker() {
-    if (botEngineWorker) return Promise.resolve(botEngineWorker);
-    try {
-        botEngineWorker = new Worker('https://cdn.jsdelivr.net/npm/fairy-stockfish@16.1.0/src/ffish.js');
-        return Promise.resolve(botEngineWorker);
-    } catch (_) {
-        return Promise.resolve(null);
+async function ensureFairyStockfishWorker() {
+    if (botEngineWorker) return botEngineWorker;
+    const urls = [
+        'https://cdn.jsdelivr.net/npm/fairy-stockfish@16.1.0/src/ffish.js',
+        'https://unpkg.com/fairy-stockfish@16.1.0/src/ffish.js'
+    ];
+    for (const url of urls) {
+        try {
+            const response = await fetch(url, { mode: 'cors', cache: 'force-cache' });
+            if (!response.ok) continue;
+            const source = await response.text();
+            if (!source || source.length < 1000) continue;
+            const blob = new Blob([source], { type: 'application/javascript' });
+            const blobUrl = URL.createObjectURL(blob);
+            const worker = new Worker(blobUrl);
+            const ok = await probeEngineWorker(worker);
+            if (!ok) {
+                try { worker.terminate(); } catch (_) {}
+                URL.revokeObjectURL(blobUrl);
+                continue;
+            }
+            botEngineWorker = worker;
+            return botEngineWorker;
+        } catch (_) {
+            // Try next source
+        }
     }
+    return null;
 }
 
 function requestEngineMove(worker, variant) {

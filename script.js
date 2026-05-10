@@ -977,16 +977,23 @@ async function ensureStockfishWorker() {
     ];
     for (const url of urls) {
         try {
-            const worker = new Worker(url);
+            const response = await fetch(url, { mode: 'cors', cache: 'force-cache' });
+            if (!response.ok) continue;
+            const source = await response.text();
+            if (!source || source.length < 1000) continue;
+            const blob = new Blob([source], { type: 'application/javascript' });
+            const blobUrl = URL.createObjectURL(blob);
+            const worker = new Worker(blobUrl);
             const ok = await probeEngineWorker(worker);
             if (!ok) {
                 try { worker.terminate(); } catch (_) {}
+                URL.revokeObjectURL(blobUrl);
                 continue;
             }
             standardBotWorker = worker;
             return standardBotWorker;
         } catch (_) {
-            // Try next CDN
+            // Try next source
         }
     }
     return null;

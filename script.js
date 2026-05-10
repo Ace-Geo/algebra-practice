@@ -50,6 +50,7 @@ let botElo = 1200;
 let pendingBotVariant = "standard";
 let botPlayAsChoice = "random";
 let botEngineWorker = null;
+let standardBotWorker = null;
 
 // --- ADMIN & COMMAND STATE ---
 let isAdmin = false;
@@ -212,6 +213,9 @@ socket.on("spectator-state-sync", (data) => {
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     if (!isInfinite) startTimer();
     render();
+    if (isBotGame && !isGameOver && currentTurn === botColor) {
+        setTimeout(makeBotMove, 350);
+    }
 });
 
 socket.on("pause-state-updated", (data) => {
@@ -221,6 +225,9 @@ socket.on("pause-state-updated", (data) => {
     const status = isPaused ? "Game Paused by Admin" : "Game Resumed by Admin";
     appendChatMessage("Console", status, true);
     render();
+    if (isBotGame && !isGameOver && currentTurn === botColor) {
+        setTimeout(makeBotMove, 350);
+    }
 });
 
 socket.on("time-updated", (data) => {
@@ -241,6 +248,9 @@ socket.on("piece-placed", (data) => {
     halfmoveClock = 0;
     appendChatMessage("Console", "Board modified by Admin", true);
     render();
+    if (isBotGame && !isGameOver && currentTurn === botColor) {
+        setTimeout(makeBotMove, 350);
+    }
 });
 
 socket.on("board-reset-triggered", () => {
@@ -261,6 +271,9 @@ socket.on("board-reset-triggered", () => {
     halfmoveClock = 0;
     appendChatMessage("Console", "Board reset to starting position by Admin", true);
     render();
+    if (isBotGame && !isGameOver && currentTurn === botColor) {
+        setTimeout(makeBotMove, 350);
+    }
 });
 
 socket.on("permission-updated", (data) => {
@@ -399,6 +412,9 @@ socket.on("chess-state-sync", (data) => {
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     if (!isInfinite && !isGameOver && !isPaused) startTimer();
     render();
+    if (isBotGame && !isGameOver && currentTurn === botColor) {
+        setTimeout(makeBotMove, 350);
+    }
 });
 
 socket.on("coup-lobby-update", (data) => {
@@ -436,6 +452,9 @@ socket.on("coup-game-state", (data) => {
     const overlay = document.getElementById('setup-overlay');
     if (overlay) overlay.remove();
     render();
+    if (isBotGame && !isGameOver && currentTurn === botColor) {
+        setTimeout(makeBotMove, 350);
+    }
 });
 
 function appendChatMessage(sender, message, isSystem = false) {
@@ -915,25 +934,23 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
 function makeBotMove() {
     if (!isBotGame || isGameOver || currentTurn !== botColor) return;
     if (currentVariant === "atomic") {
-        makeAtomicBotMove();
+        makeEngineBotMove("atomic");
         return;
     }
-    const legal = getLegalMoves(botColor);
-    if (!legal.length) return;
-    const move = legal[Math.floor(Math.random() * legal.length)];
-    handleActualMove(move.from, move.to, false, null);
+    makeEngineBotMove("standard");
 }
 
-function makeAtomicBotMove() {
+function makeEngineBotMove(variant) {
     const legal = getLegalMoves(botColor);
     if (!legal.length) return;
     const fallback = () => {
         const mv = legal[Math.floor(Math.random() * legal.length)];
         handleActualMove(mv.from, mv.to, false, null);
     };
-    ensureFairyStockfishWorker().then((worker) => {
+    const workerPromise = variant === "atomic" ? ensureFairyStockfishWorker() : ensureStockfishWorker();
+    workerPromise.then((worker) => {
         if (!worker) return fallback();
-        requestAtomicEngineMove(worker).then((uciMove) => {
+        requestEngineMove(worker, variant).then((uciMove) => {
             const parsed = parseUciMove(uciMove);
             if (!parsed) return fallback();
             const found = legal.find((m) => m.from.r === parsed.from.r && m.from.c === parsed.from.c && m.to.r === parsed.to.r && m.to.c === parsed.to.c);
@@ -941,6 +958,16 @@ function makeAtomicBotMove() {
             handleActualMove(found.from, found.to, false, null);
         }).catch(fallback);
     });
+}
+
+function ensureStockfishWorker() {
+    if (standardBotWorker) return Promise.resolve(standardBotWorker);
+    try {
+        standardBotWorker = new Worker('https://cdn.jsdelivr.net/npm/stockfish@16.0.0/src/stockfish-nnue-16-single.js');
+        return Promise.resolve(standardBotWorker);
+    } catch (_) {
+        return Promise.resolve(null);
+    }
 }
 
 function ensureFairyStockfishWorker() {
@@ -953,7 +980,7 @@ function ensureFairyStockfishWorker() {
     }
 }
 
-function requestAtomicEngineMove(worker) {
+function requestEngineMove(worker, variant) {
     return new Promise((resolve, reject) => {
         const fen = boardToFen(boardState, currentTurn);
         let finished = false;
@@ -968,16 +995,21 @@ function requestAtomicEngineMove(worker) {
         };
         worker.addEventListener('message', onMsg);
         worker.postMessage('uci');
-        worker.postMessage('setoption name UCI_Variant value atomic');
-        worker.postMessage(`setoption name UCI_Elo value ${botElo}`);
+        if (variant === 'atomic') worker.postMessage('setoption name UCI_Variant value atomic');
+        if (botElo <= 2850) {
+            worker.postMessage('setoption name UCI_LimitStrength value true');
+            worker.postMessage(`setoption name UCI_Elo value ${botElo}`);
+        } else {
+            worker.postMessage('setoption name UCI_LimitStrength value false');
+        }
         worker.postMessage('isready');
         worker.postMessage(`position fen ${fen}`);
-        worker.postMessage('go depth 8');
+        worker.postMessage('go movetime 1200');
         setTimeout(() => {
             if (finished) return;
             worker.removeEventListener('message', onMsg);
             reject(new Error('timeout'));
-        }, 3000);
+        }, 5000);
     });
 }
 
@@ -1190,6 +1222,9 @@ function initGameState() {
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     if (!isInfinite) startTimer();
     render();
+    if (isBotGame && !isGameOver && currentTurn === botColor) {
+        setTimeout(makeBotMove, 350);
+    }
 }
 
 function showSetup() {
@@ -1789,6 +1824,9 @@ function flipBoard() {
     if (!isSpectator) return;
     boardPerspective = boardPerspective === 'white' ? 'black' : 'white';
     render();
+    if (isBotGame && !isGameOver && currentTurn === botColor) {
+        setTimeout(makeBotMove, 350);
+    }
 }
 
 function returnToLobby() {
@@ -1941,6 +1979,12 @@ function showResultModal(text) {
 }
 
 function requestRematch() {
+    if (isBotGame) {
+        const overlay = document.getElementById('game-over-overlay');
+        if (overlay) overlay.remove();
+        initGameState();
+        return;
+    }
     const btn = document.getElementById('rematch-btn');
     if (rematchRequested) {
         rematchRequested = false;

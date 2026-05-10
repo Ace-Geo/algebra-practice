@@ -962,7 +962,7 @@ function makeEngineBotMove(variant) {
             }
             handleActualMove(found.from, found.to, false, null);
         }).catch(() => {
-            appendChatMessage("System", "Engine timed out while choosing a move.", true);
+            appendChatMessage("System", "Engine could not provide a move.", true);
         });
     });
 }
@@ -1056,20 +1056,14 @@ function requestEngineMove(worker, variant) {
         worker.addEventListener('message', onMsg);
         worker.postMessage('uci');
         if (variant === 'atomic') worker.postMessage('setoption name UCI_Variant value atomic');
-        if (botElo <= 2850) {
-            worker.postMessage('setoption name UCI_LimitStrength value true');
-            worker.postMessage(`setoption name UCI_Elo value ${botElo}`);
-        } else {
-            worker.postMessage('setoption name UCI_LimitStrength value false');
-        }
+        const requestedElo = Math.max(400, Math.min(3000, Number(botElo) || 1000));
+        worker.postMessage('setoption name UCI_LimitStrength value true');
+        worker.postMessage(`setoption name UCI_Elo value ${requestedElo}`);
+        const skill = Math.max(0, Math.min(20, Math.round((requestedElo - 400) / 130)));
+        worker.postMessage(`setoption name Skill Level value ${skill}`);
         worker.postMessage('isready');
         worker.postMessage(`position fen ${fen}`);
-        worker.postMessage(botElo >= 2800 ? 'go depth 18' : 'go movetime 1200');
-        setTimeout(() => {
-            if (finished) return;
-            worker.removeEventListener('message', onMsg);
-            reject(new Error('timeout'));
-        }, 5000);
+        worker.postMessage('go depth 16');
     });
 }
 
@@ -1525,7 +1519,7 @@ function startBotGameFromSetup() {
     myColor = playAs;
     isSpectator = false;
     currentVariant = pendingBotVariant === "atomic" ? "atomic" : "standard";
-    gameSettings = currentVariant === "atomic" ? { mins: 3, secs: 0, inc: 2, variant: "atomic" } : { mins: 10, secs: 0, inc: 0, variant: "standard" };
+    gameSettings = currentVariant === "atomic" ? { mins: 0, secs: 0, inc: 0, variant: "atomic" } : { mins: 0, secs: 0, inc: 0, variant: "standard" };
     const botLabel = currentVariant === "atomic" ? `Fairy Bot (${botElo})` : `Bot (${botElo})`;
     whiteName = playAs === "white" ? "You" : botLabel;
     blackName = playAs === "black" ? "You" : botLabel;

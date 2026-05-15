@@ -20,6 +20,9 @@ let isSpectator = false;
 let boardPerspective = "white";
 let lobbySpectateEnabled = false;
 let activeGames = [];
+let spectateVariantPreference = "standard";
+let spectateSilent = false;
+let spectateListPoll = null;
 let spectatorRoster = [];
 let setupView = "menu";
 let selectedGame = null;
@@ -1875,6 +1878,7 @@ function renderActionCard(action, desc, cssClass, disabled, targeted) {
 }
 
 function openSpectateMenu() {
+    spectateVariantPreference = (selectedGame === 'atomic' || currentVariant === 'atomic') ? 'atomic' : 'standard';
     const content = document.getElementById('setup-card-content');
     if (!content) return;
     content.innerHTML = `
@@ -1883,31 +1887,60 @@ function openSpectateMenu() {
         <button class="action-btn" style="margin-top: 10px; width: 100%;" onclick="setSetupView('chess-menu')">Back</button>
     `;
     socket.emit("list-active-games");
+    if (spectateListPoll) clearInterval(spectateListPoll);
+    spectateListPoll = setInterval(() => {
+        if (!document.getElementById('spectate-games-list')) { clearInterval(spectateListPoll); spectateListPoll = null; return; }
+        socket.emit('list-active-games');
+    }, 2500);
 }
 
 function renderSpectateList() {
     const list = document.getElementById('spectate-games-list');
     if (!list) return;
     if (!activeGames.length) {
-        list.innerHTML = `<div style="background:#1a1a1a; padding:12px; border-radius:6px;">No active games right now.</div>`;
+        list.innerHTML = '<p style="color:#bababa;">No active games right now.</p>';
         return;
     }
-
-    list.innerHTML = activeGames.map((game) => `
-        <div style="background:#1a1a1a; padding:12px; border-radius:6px; margin-bottom:10px;">
-            <div><b>White:</b> ${game.whiteName}</div>
-            <div><b>Black:</b> ${game.blackName}</div>
-            <div><b>Time:</b> ${game.settings.mins}m ${game.settings.secs}s + ${game.settings.inc}s</div>
-            <button class="start-btn" style="margin-top:10px;" onclick="spectateRoom('${game.password}')">Spectate</button>
-        </div>
-    `).join('');
+    const sorted = [...activeGames].sort((a, b) => {
+        const av = (a.settings?.variant || 'standard');
+        const bv = (b.settings?.variant || 'standard');
+        const ap = av === spectateVariantPreference ? 0 : 1;
+        const bp = bv === spectateVariantPreference ? 0 : 1;
+        return ap - bp;
+    });
+    list.innerHTML = sorted.map((game) => {
+        const variant = (game.settings?.variant || 'standard').toUpperCase();
+        const snap = renderBoardSnapshot(game.boardState);
+        return `
+        <div style="background:#1a1a1a; padding:12px; border-radius:6px; margin-bottom:10px; display:flex; gap:10px; align-items:flex-start;">
+            <div style="flex:1;">
+                <strong>${game.whiteName} vs ${game.blackName}</strong><br>
+                <small style="color:#bababa;">${variant} • ${game.settings.mins}m ${game.settings.secs}s +${game.settings.inc}</small><br>
+                <small style="color:#9e9e9e;">Room: ${game.password}</small>
+                <div style="margin-top:8px; display:flex; gap:8px;">
+                    <button class="start-btn" onclick="spectateRoom('${game.password}', false)">Spectate</button>
+                    <button class="action-btn" onclick="spectateRoom('${game.password}', true)">Silent Spectate</button>
+                </div>
+            </div>
+            <div>${snap}</div>
+        </div>`;
+    }).join('');
 }
 
-function spectateRoom(password) {
+function renderBoardSnapshot(board) {
+    if (!board || !Array.isArray(board) || !board.length) return '<div style="font-size:11px;color:#888;">No snapshot yet</div>';
+    const map={'♔':'K','♕':'Q','♖':'R','♗':'B','♘':'N','♙':'P','♚':'k','♛':'q','♜':'r','♝':'b','♞':'n','♟':'p'};
+    let html='<div style="display:grid;grid-template-columns:repeat(8,10px);border:1px solid #555;">';
+    for(let r=0;r<8;r++){for(let c=0;c<8;c++){const p=board[r][c]||'';const light=(r+c)%2===0;html+=`<div style="width:10px;height:10px;font-size:8px;line-height:10px;text-align:center;background:${light?'#f0d9b5':'#b58863'};color:${p&&p===p.toLowerCase()?'#111':'#fff'};">${map[p]||''}</div>`;}}
+    html+='</div>';
+    return html;
+}
+
+function spectateRoom(password, silent = false) {
     const chosen = prompt("Enter your spectator username:", "Spectator");
     if (!chosen || !chosen.trim()) return;
     spectatorName = chosen.trim();
-    socket.emit("spectate-game", { password, name: spectatorName });
+    socket.emit("spectate-game", { password, name: spectatorName, silent });
 }
 
 function resignGame() {

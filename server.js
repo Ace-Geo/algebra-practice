@@ -158,7 +158,8 @@ function buildActiveGames() {
             password,
             whiteName: room.players.whiteName || "White",
             blackName: room.players.blackName || "Black",
-            settings: room.settings
+            settings: room.settings,
+            boardState: room.lastSpectatorState?.boardState || null
         }));
 }
 
@@ -201,7 +202,7 @@ io.on("connection", (socket) => {
     });
 
     socket.on("confirm-join", (data) => {
-        const { password, name } = data;
+        const { password, name, silent } = data;
         const room = rooms[password];
         if (!room || room.status !== "waiting") return;
 
@@ -596,7 +597,7 @@ io.on("connection", (socket) => {
     });
 
     socket.on("spectate-game", (data) => {
-        const { password, name } = data;
+        const { password, name, silent } = data;
         const room = rooms[password];
         if (!room || room.status !== "active" || !room.players.white || !room.players.black) {
             socket.emit("error-msg", "Game not available for spectating.");
@@ -617,16 +618,20 @@ io.on("connection", (socket) => {
         });
 
         emitSpectatorList(password);
-        io.in(password).emit("receive-chat", {
-            sender: "System",
-            message: `${name} is now spectating the game.`
-        });
+        if (!silent) {
+            io.in(password).emit("receive-chat", {
+                sender: "System",
+                message: `${name} is now spectating the game.`
+            });
+        }
 
         io.to(room.players.white).emit("spectator-sync-needed", { requesterId: socket.id });
         io.to(room.players.black).emit("spectator-sync-needed", { requesterId: socket.id });
     });
 
     socket.on("spectator-state-sync", (data) => {
+        const room = rooms[data.password];
+        if (room && data.state) room.lastSpectatorState = data.state;
         io.to(data.targetSocketId).emit("spectator-state-sync", { state: data.state });
     });
 

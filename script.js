@@ -23,6 +23,13 @@ let activeGames = [];
 let spectateVariantPreference = "standard";
 let spectateSilent = false;
 let spectateListPoll = null;
+
+let isOpeningPractice = false;
+let openingRepertoireLines = [];
+let openingCurrentLine = [];
+let openingIndex = 0;
+let openingPlayerColor = 'white';
+
 let spectatorRoster = [];
 let setupView = "menu";
 let selectedGame = null;
@@ -1231,7 +1238,7 @@ function render(forcedStatus) {
                         let promotionChoice = null;
                         const isPromotionMove = (piece === '♙' && team === 'white' && r === 0) || (piece === '♟' && team === 'black' && r === 7);
                         if (isPromotionMove) promotionChoice = await choosePromotionPiece(team);
-                        handleActualMove(selected, { r, c }, true, promotionChoice);
+                        handleOpeningPracticePlayerMove(selected, { r, c }, promotionChoice);
                     } else if (getTeam(boardState[r][c]) === currentTurn) {
                         selected = (selected.r === r && selected.c === c) ? null : { r, c };
                         render();
@@ -1364,6 +1371,7 @@ function renderSetupCard() {
             <button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="showRulesPopup()">Game Rules</button>
             ${lobbySpectateEnabled ? '<button class="action-btn" style="margin-top:10px; width:100%; padding:12px; font-size:14px;" onclick="openSpectateMenu()">Spectate Games</button>' : ''}
             <button class="action-btn" style="margin-top:10px; width:100%;" onclick="startBotGameSetup('standard')">Play vs Bot</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('chess-opening-practice')">Practice Opening Repertoire</button>
             <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('game-select')">Play a Different Game</button>
         `;
         return;
@@ -1394,6 +1402,20 @@ function renderSetupCard() {
     }
 
 
+
+    if (setupView === "chess-opening-practice") {
+        content.innerHTML = `
+            <h2 style="color:#779556; margin-top:0;">Opening Practice</h2>
+            <div class="input-group"><label>Built-in Repertoire</label>
+                <select id="openingPreset"><option value="london">London System</option></select>
+            </div>
+            <div class="input-group"><label>Or Upload PGN</label><input id="openingPgnFile" type="file" accept=".pgn,text/plain"></div>
+            <div class="input-group"><label>Play As</label><select id="openingColor"><option value="white">White</option><option value="black">Black</option></select></div>
+            <button class="start-btn" onclick="startOpeningPractice()">START PRACTICE</button>
+            <button class="action-btn" style="margin-top:10px; width:100%;" onclick="setSetupView('chess-menu')">Return to Menu</button>
+        `;
+        return;
+    }
 
     if (setupView === "chess-bot-setup" || setupView === "atomic-bot-setup") {
         const isAtomic = setupView === "atomic-bot-setup";
@@ -1544,6 +1566,123 @@ function setSetupView(view) {
     if (view.startsWith("coup-")) selectedGame = "coup";
     renderSetupCard();
 }
+
+
+function getBuiltInLondonPgn() {
+    return `1. d4 d5 2. Bf4 c5 3. e3`;
+}
+
+function tokenizePgnMoves(pgn) {
+    return (pgn || '')
+        .replace(/\{[^}]*\}/g, ' ')
+        .replace(/\[[^\]]*\]/g, ' ')
+        .replace(/\r?\n/g, ' ')
+        .replace(/\d+\.\.\./g, ' ')
+        .replace(/\d+\./g, ' ')
+        .replace(/\$/g, ' $')
+        .match(/\(|\)|[^\s()]+/g) || [];
+}
+
+function extractPracticeLinesFromPgn(pgn) {
+    const tokens = tokenizePgnMoves(pgn).filter(t => !/^\$\d+/.test(t) && !['*','1-0','0-1','1/2-1/2'].includes(t));
+    const lines = [];
+    function walk(i, base) {
+        let line = [...base];
+        while (i < tokens.length) {
+            const t = tokens[i];
+            if (t === ')') return i + 1;
+            if (t === '(') {
+                walk(i + 1, [...line]);
+                let depth = 1; i++;
+                while (i < tokens.length && depth) { if (tokens[i] === '(') depth++; else if (tokens[i] === ')') depth--; i++; }
+                continue;
+            }
+            line.push(t); i++;
+        }
+        if (line.length) lines.push(line);
+        return i;
+    }
+    walk(0, []);
+    return lines.filter(l => l.length > 1);
+}
+
+function normalizeSan(s) {
+    return (s || '').replace(/[+#?!]/g, '').trim();
+}
+
+function moveToSan(move) {
+    const piece = boardState[move.from.r][move.from.c];
+    const target = boardState[move.to.r][move.to.c];
+    const isEP = (piece === '♙' || piece === '♟') && enPassantTarget && enPassantTarget.r === move.to.r && enPassantTarget.c === move.to.c;
+    const castle = (piece === '♔' || piece === '♚') && Math.abs(move.from.c - move.to.c) === 2 ? (move.from.c < move.to.c ? 'short' : 'long') : null;
+    return normalizeSan(getNotation(move.from.r, move.from.c, move.to.r, move.to.c, piece, target, isEP, castle));
+}
+
+function findMoveBySan(team, san) {
+    const target = normalizeSan(san);
+    const legal = getLegalMoves(team);
+    return legal.find(m => moveToSan(m) === target) || null;
+}
+
+async function startOpeningPractice() {
+    const color = document.getElementById('openingColor')?.value || 'white';
+    const file = document.getElementById('openingPgnFile')?.files?.[0];
+    let pgn = getBuiltInLondonPgn();
+    if (file) pgn = await file.text();
+    const lines = extractPracticeLinesFromPgn(pgn);
+    if (!lines.length) return alert('Could not parse any opening lines from PGN.');
+    openingRepertoireLines = lines;
+    openingCurrentLine = lines[Math.floor(Math.random() * lines.length)];
+    openingIndex = 0;
+    openingPlayerColor = color;
+    isOpeningPractice = true;
+    isBotGame = false;
+    isSpectator = false;
+    myColor = color;
+    currentVariant = 'standard';
+    gameSettings = { mins: 0, secs: 0, inc: 0, variant: 'standard' };
+    whiteName = color === 'white' ? 'You' : 'Repertoire';
+    blackName = color === 'black' ? 'You' : 'Repertoire';
+    const overlay = document.getElementById('setup-overlay'); if (overlay) overlay.remove();
+    initGameState();
+    runOpeningPracticeTurn();
+}
+
+function runOpeningPracticeTurn() {
+    if (!isOpeningPractice || isGameOver) return;
+    while (openingIndex < openingCurrentLine.length && currentTurn !== openingPlayerColor) {
+        const san = openingCurrentLine[openingIndex];
+        const mv = findMoveBySan(currentTurn, san);
+        if (!mv) break;
+        openingIndex++;
+        handleActualMove(mv.from, mv.to, false, null);
+        if (isGameOver) return;
+    }
+    if (openingIndex >= openingCurrentLine.length) {
+        appendChatMessage('System', 'Line complete! Loading another variation...', true);
+        openingCurrentLine = openingRepertoireLines[Math.floor(Math.random() * openingRepertoireLines.length)];
+        openingIndex = 0;
+        initGameState();
+        runOpeningPracticeTurn();
+    }
+}
+
+function handleOpeningPracticePlayerMove(from, to, promotionChoice) {
+    if (!isOpeningPractice) return handleActualMove(from, to, true, promotionChoice);
+    const expected = openingCurrentLine[openingIndex];
+    const expectedMove = findMoveBySan(currentTurn, expected);
+    if (!expectedMove) return;
+    if (from.r !== expectedMove.from.r || from.c !== expectedMove.from.c || to.r !== expectedMove.to.r || to.c !== expectedMove.to.c) {
+        appendChatMessage('System', `Mistake. Correct move: ${expected}`, true);
+        lastMoveHighlight = { from: expectedMove.from, to: expectedMove.to };
+        render();
+        return;
+    }
+    openingIndex++;
+    handleActualMove(from, to, true, promotionChoice);
+    setTimeout(runOpeningPracticeTurn, 100);
+}
+
 
 function createRoom(variant = "standard") {
     currentPassword = document.getElementById('roomPass').value; tempName = document.getElementById('uName').value;

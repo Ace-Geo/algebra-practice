@@ -1640,18 +1640,71 @@ function normalizeSan(s) {
     return (s || '').replace(/[+#?!]/g, '').trim();
 }
 
-function moveToSan(move) {
-    const piece = boardState[move.from.r][move.from.c];
-    const target = boardState[move.to.r][move.to.c];
-    const isEP = (piece === '♙' || piece === '♟') && enPassantTarget && enPassantTarget.r === move.to.r && enPassantTarget.c === move.to.c;
-    const castle = (piece === '♔' || piece === '♚') && Math.abs(move.from.c - move.to.c) === 2 ? (move.from.c < move.to.c ? 'short' : 'long') : null;
-    return normalizeSan(getNotation(move.from.r, move.from.c, move.to.r, move.to.c, piece, target, isEP, castle));
+function parseSanHints(sanRaw) {
+    const san = normalizeSan(sanRaw);
+    if (san === 'O-O' || san === '0-0') return { castle: 'short' };
+    if (san === 'O-O-O' || san === '0-0-0') return { castle: 'long' };
+
+    let txt = san;
+    let promotion = null;
+    const promoIdx = txt.indexOf('=');
+    if (promoIdx !== -1) {
+        promotion = txt.slice(promoIdx + 1, promoIdx + 2).toUpperCase();
+        txt = txt.slice(0, promoIdx);
+    }
+
+    const pieceMatch = txt.match(/^[KQRBN]/);
+    const piece = pieceMatch ? pieceMatch[0] : 'P';
+    if (pieceMatch) txt = txt.slice(1);
+
+    txt = txt.replace('x', '');
+    const target = txt.slice(-2);
+    const prefix = txt.slice(0, -2);
+    const fromFile = /[a-h]/.test(prefix) ? prefix.match(/[a-h]/)[0] : null;
+    const fromRank = /[1-8]/.test(prefix) ? prefix.match(/[1-8]/)[0] : null;
+
+    return { piece, target, fromFile, fromRank, promotion };
+}
+
+function pieceToLetter(piece) {
+    const map = { '♔':'K','♕':'Q','♖':'R','♗':'B','♘':'N','♙':'P','♚':'K','♛':'Q','♜':'R','♝':'B','♞':'N','♟':'P' };
+    return map[piece] || null;
+}
+
+function moveToUci(move) {
+    const files = 'abcdefgh';
+    return `${files[move.from.c]}${8 - move.from.r}${files[move.to.c]}${8 - move.to.r}`;
 }
 
 function findMoveBySan(team, san) {
-    const target = normalizeSan(san);
+    const hints = parseSanHints(san);
     const legal = getLegalMoves(team);
-    return legal.find(m => moveToSan(m) === target) || null;
+    if (hints.castle) {
+        return legal.find((m) => {
+            const piece = boardState[m.from.r][m.from.c];
+            if (!piece || pieceToLetter(piece) !== 'K') return false;
+            const diff = m.to.c - m.from.c;
+            return hints.castle === 'short' ? diff === 2 : diff === -2;
+        }) || null;
+    }
+
+    const files = 'abcdefgh';
+    const toFile = hints.target ? files.indexOf(hints.target[0]) : -1;
+    const toRank = hints.target ? Number(hints.target[1]) : NaN;
+    return legal.find((m) => {
+        const piece = boardState[m.from.r][m.from.c];
+        if (!piece) return false;
+        if (pieceToLetter(piece) !== hints.piece) return false;
+        if (toFile !== -1 && m.to.c !== toFile) return false;
+        if (!Number.isNaN(toRank) && (8 - m.to.r) !== toRank) return false;
+        if (hints.fromFile && files[m.from.c] !== hints.fromFile) return false;
+        if (hints.fromRank && String(8 - m.from.r) !== hints.fromRank) return false;
+        if (hints.promotion) {
+            const u = moveToUci(m);
+            if (!u.endsWith(hints.promotion.toLowerCase())) return false;
+        }
+        return true;
+    }) || null;
 }
 
 async function startOpeningPractice() {

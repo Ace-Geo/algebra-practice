@@ -1569,7 +1569,23 @@ function setSetupView(view) {
 
 
 function getBuiltInLondonPgn() {
-    return `1. d4 d5 2. Bf4 c5 3. e3`;
+    return `[Event "?"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "You"]
+[Black "Opponent"]
+[Result "*"]
+
+1. d4 d5 (1... Nf6 2. Bf4 c5 (2... e6 3. e3 c5 4. c3 b6 5. Nf3 cxd4 6. Nxd4 Nd5 7. Bg3 a6 8. Qf3 d6 9. c4 Nc7 10. Nc3)
+(2... g6 3. e3 Bg7 4. h3 O-O 5. Nf3 d5 6. c3 c5 7. Nbd2 Nc6 8. dxc5 Nd7 9. Nb3 e5 10. Bg3)
+3. e3 Nd5 4. Bg3 Qb6 5. c4 Qxb2 6. cxd5 Qxa1 7. Qc2 Na6 8. Bxa6 bxa6 9. Nf3 d6 10. Bxd6 exd6 11. O-O)
+2. Bf4 c5 (2... e6 3. e3 Nf6 4. Nd2 Bd6 5. Ngf3 O-O 6. Bd3 b6 7. Qe2 Bb7 8. O-O c5 9. c3 Ne4 10. Rfd1)
+(2... Nf6 3. e3 e6 4. Nd2 Bd6 5. Ngf3 c5 6. c3 Qc7 7. Bxd6 Qxd6 8. Ne5 Nc6 9. f4 O-O)
+(2... Bf5 3. c4 e6 4. Nc3 c6 5. Qb3 Qb6 6. c5 Qxb3 7. axb3 Nd7 8. b4 a6)
+3. e3 Qb6 (3... Nf6 4. c3 Nc6 5. Nd2 Bf5 6. Qb3 Qb6 7. dxc5 Qxb3 8. axb3 e5)
+(3... Nc6 4. c3 Nf6 5. Nd2 cxd4 6. exd4 Bf5 7. Qb3 Qd7 8. Ngf3 e6)
+4. Nc3 Nf6 5. Nb5 Na6 6. c3 e6 7. a4 Bd7 8. Nf3 Be7 9. a5 Qd8 10. Nd6+ Bxd6 11. Bxd6 Ne4 12. Bf4 *`;
 }
 
 function tokenizePgnMoves(pgn) {
@@ -1584,26 +1600,40 @@ function tokenizePgnMoves(pgn) {
 }
 
 function extractPracticeLinesFromPgn(pgn) {
-    const tokens = tokenizePgnMoves(pgn).filter(t => !/^\$\d+/.test(t) && !['*','1-0','0-1','1/2-1/2'].includes(t));
-    const lines = [];
-    function walk(i, base) {
-        let line = [...base];
-        while (i < tokens.length) {
-            const t = tokens[i];
-            if (t === ')') return i + 1;
-            if (t === '(') {
-                walk(i + 1, [...line]);
-                let depth = 1; i++;
-                while (i < tokens.length && depth) { if (tokens[i] === '(') depth++; else if (tokens[i] === ')') depth--; i++; }
+    const tokens = tokenizePgnMoves(pgn).filter((t) => !/^\$\d+/.test(t) && !['*', '1-0', '0-1', '1/2-1/2'].includes(t));
+
+    function parseSequence(index, prefix) {
+        let current = [...prefix];
+        const completed = [];
+
+        while (index < tokens.length) {
+            const tok = tokens[index];
+            if (tok === ')') {
+                completed.push(current);
+                return { index: index + 1, lines: completed };
+            }
+            if (tok === '(') {
+                const nested = parseSequence(index + 1, current);
+                completed.push(...nested.lines);
+                index = nested.index;
                 continue;
             }
-            line.push(t); i++;
+            current.push(tok);
+            index += 1;
         }
-        if (line.length) lines.push(line);
-        return i;
+
+        completed.push(current);
+        return { index, lines: completed };
     }
-    walk(0, []);
-    return lines.filter(l => l.length > 1);
+
+    const result = parseSequence(0, []);
+    const uniq = new Map();
+    result.lines.forEach((line) => {
+        if (line.length < 2) return;
+        const key = line.join(' ');
+        if (!uniq.has(key)) uniq.set(key, line);
+    });
+    return [...uniq.values()];
 }
 
 function normalizeSan(s) {

@@ -1691,6 +1691,45 @@ function findMoveBySan(team, san) {
     }) || null;
 }
 
+function validateOpeningLinePlayable(line) {
+    const saved = {
+        boardState: boardState.map((r) => [...r]),
+        currentTurn,
+        hasMoved: { ...hasMoved },
+        enPassantTarget: enPassantTarget ? { ...enPassantTarget } : null,
+        halfmoveClock,
+        positionCounts: { ...positionCounts },
+        moveHistory: moveHistory.map((m) => ({ ...m })),
+        isGameOver
+    };
+
+    let ok = true;
+    for (const san of line) {
+        const mv = findMoveBySan(currentTurn, san);
+        if (!mv) { ok = false; break; }
+        handleActualMove(mv.from, mv.to, false, null);
+        if (isGameOver) break;
+    }
+
+    boardState = saved.boardState;
+    currentTurn = saved.currentTurn;
+    hasMoved = saved.hasMoved;
+    enPassantTarget = saved.enPassantTarget;
+    halfmoveClock = saved.halfmoveClock;
+    positionCounts = saved.positionCounts;
+    moveHistory = saved.moveHistory;
+    isGameOver = saved.isGameOver;
+    selected = null;
+
+    return ok;
+}
+
+function pickRandomOpeningLine(lines) {
+    const valid = lines.filter((l) => validateOpeningLinePlayable(l));
+    const pool = valid.length ? valid : lines;
+    return pool[Math.floor(Math.random() * pool.length)] || [];
+}
+
 async function startOpeningPractice() {
     const color = document.getElementById('openingColor')?.value || 'white';
     const file = document.getElementById('openingPgnFile')?.files?.[0];
@@ -1699,7 +1738,7 @@ async function startOpeningPractice() {
     const lines = extractPracticeLinesFromPgn(pgn);
     if (!lines.length) return alert('Could not parse any opening lines from PGN.');
     openingRepertoireLines = lines;
-    openingCurrentLine = lines[Math.floor(Math.random() * lines.length)];
+    openingCurrentLine = pickRandomOpeningLine(lines);
     openingIndex = 0;
     openingPlayerColor = color;
     isOpeningPractice = true;
@@ -1720,14 +1759,20 @@ function runOpeningPracticeTurn() {
     while (openingIndex < openingCurrentLine.length && currentTurn !== openingPlayerColor) {
         const san = openingCurrentLine[openingIndex];
         const mv = findMoveBySan(currentTurn, san);
-        if (!mv) break;
+        if (!mv) {
+            appendChatMessage('System', `Current repertoire move could not be resolved: ${san}. Loading another line...`, true);
+            openingCurrentLine = pickRandomOpeningLine(openingRepertoireLines);
+            openingIndex = 0;
+            initGameState();
+            return setTimeout(runOpeningPracticeTurn, 100);
+        }
         openingIndex++;
         handleActualMove(mv.from, mv.to, false, null);
         if (isGameOver) return;
     }
     if (openingIndex >= openingCurrentLine.length) {
         appendChatMessage('System', 'Line complete! Loading another variation...', true);
-        openingCurrentLine = openingRepertoireLines[Math.floor(Math.random() * openingRepertoireLines.length)];
+        openingCurrentLine = pickRandomOpeningLine(openingRepertoireLines);
         openingIndex = 0;
         initGameState();
         runOpeningPracticeTurn();
@@ -1738,7 +1783,13 @@ function handleOpeningPracticePlayerMove(from, to, promotionChoice) {
     if (!isOpeningPractice) return handleActualMove(from, to, true, promotionChoice);
     const expected = openingCurrentLine[openingIndex];
     const expectedMove = findMoveBySan(currentTurn, expected);
-    if (!expectedMove) return;
+    if (!expectedMove) {
+        appendChatMessage('System', `Could not resolve expected repertoire move: ${expected}. Loading another line...`, true);
+        openingCurrentLine = pickRandomOpeningLine(openingRepertoireLines);
+        openingIndex = 0;
+        initGameState();
+        return setTimeout(runOpeningPracticeTurn, 100);
+    }
     if (from.r !== expectedMove.from.r || from.c !== expectedMove.from.c || to.r !== expectedMove.to.r || to.c !== expectedMove.to.c) {
         appendChatMessage('System', `Mistake. Correct move: ${expected}`, true);
         lastMoveHighlight = { from: expectedMove.from, to: expectedMove.to };

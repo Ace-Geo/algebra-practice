@@ -1738,7 +1738,6 @@ async function startOpeningPractice() {
     const lines = extractPracticeLinesFromPgn(pgn);
     if (!lines.length) return alert('Could not parse any opening lines from PGN.');
     openingRepertoireLines = lines;
-    openingCurrentLine = pickRandomOpeningLine(lines);
     openingIndex = 0;
     openingPlayerColor = color;
     isOpeningPractice = true;
@@ -1750,6 +1749,9 @@ async function startOpeningPractice() {
     whiteName = color === 'white' ? 'You' : 'Repertoire';
     blackName = color === 'black' ? 'You' : 'Repertoire';
     const overlay = document.getElementById('setup-overlay'); if (overlay) overlay.remove();
+    initGameState();
+    openingCurrentLine = pickRandomOpeningLine(lines);
+    openingIndex = 0;
     initGameState();
     runOpeningPracticeTurn();
 }

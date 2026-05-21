@@ -1741,7 +1741,7 @@ function pickRandomOpeningLine(lines) {
     const compiled = lines
         .map((line) => compileOpeningLineToUci(line))
         .filter((x) => x && x.uci && x.uci.length);
-    if (!compiled.length) return { line: lines[0] || [], uci: [] };
+    if (!compiled.length) return { san: [], uci: [] };
     return compiled[Math.floor(Math.random() * compiled.length)];
 }
 
@@ -1766,10 +1766,13 @@ async function startOpeningPractice() {
     const overlay = document.getElementById('setup-overlay'); if (overlay) overlay.remove();
     initGameState();
     const picked = pickRandomOpeningLine(lines);
-    openingCurrentLine = picked.line;
-    openingCurrentUciLine = picked.uci;
+    openingCurrentLine = picked.san || [];
+    openingCurrentUciLine = picked.uci || [];
     openingIndex = 0;
-    initGameState();
+    if (!openingCurrentUciLine.length) {
+        isOpeningPractice = false;
+        return alert('No playable opening lines found in this PGN.');
+    }
     runOpeningPracticeTurn();
 }
 
@@ -1781,7 +1784,7 @@ function runOpeningPracticeTurn() {
         if (!parsed) {
             appendChatMessage('System', 'Current repertoire move could not be resolved. Loading another line...', true);
             const picked = pickRandomOpeningLine(openingRepertoireLines);
-            openingCurrentLine = picked.line;
+            openingCurrentLine = picked.san || [];
             openingCurrentUciLine = picked.uci;
             openingIndex = 0;
             initGameState();
@@ -1794,7 +1797,7 @@ function runOpeningPracticeTurn() {
     if (openingIndex >= openingCurrentUciLine.length) {
         appendChatMessage('System', 'Line complete! Loading another variation...', true);
         const picked = pickRandomOpeningLine(openingRepertoireLines);
-        openingCurrentLine = picked.line;
+        openingCurrentLine = picked.san || [];
         openingCurrentUciLine = picked.uci;
         openingIndex = 0;
         initGameState();
@@ -1804,28 +1807,32 @@ function runOpeningPracticeTurn() {
 
 function handleOpeningPracticePlayerMove(from, to, promotionChoice) {
     if (!isOpeningPractice) return handleActualMove(from, to, true, promotionChoice);
-    const expected = openingCurrentLine[openingIndex];
-    const expectedMove = findMoveBySan(currentTurn, expected);
+    if (currentTurn !== openingPlayerColor) return;
+
+    const expectedSan = openingCurrentLine[openingIndex] || openingCurrentUciLine[openingIndex] || '?';
+    const expectedUci = openingCurrentUciLine[openingIndex];
+    const expectedMove = parseUciBoardMove(expectedUci);
     if (!expectedMove) {
-        appendChatMessage('System', `Could not resolve expected repertoire move: ${expected}. Loading another line...`, true);
+        appendChatMessage('System', `Could not resolve expected repertoire move: ${expectedSan}. Loading another line...`, true);
         const picked = pickRandomOpeningLine(openingRepertoireLines);
-        openingCurrentLine = picked.line;
-        openingCurrentUciLine = picked.uci;
+        openingCurrentLine = picked.san || [];
+        openingCurrentUciLine = picked.uci || [];
         openingIndex = 0;
         initGameState();
         return setTimeout(runOpeningPracticeTurn, 100);
     }
+
     if (from.r !== expectedMove.from.r || from.c !== expectedMove.from.c || to.r !== expectedMove.to.r || to.c !== expectedMove.to.c) {
-        appendChatMessage('System', `Mistake. Correct move: ${expected}`, true);
+        appendChatMessage('System', `Mistake. Correct move: ${expectedSan}`, true);
         lastMoveHighlight = { from: expectedMove.from, to: expectedMove.to };
         render();
         return;
     }
+
     openingIndex++;
     handleActualMove(from, to, true, promotionChoice);
     setTimeout(runOpeningPracticeTurn, 100);
 }
-
 
 function createRoom(variant = "standard") {
     currentPassword = document.getElementById('roomPass').value; tempName = document.getElementById('uName').value;

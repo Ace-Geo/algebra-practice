@@ -1724,7 +1724,8 @@ function compileOpeningLineToUci(line) {
     isGameOver = saved.isGameOver;
     selected = null;
 
-    return ok ? uciLine : null;
+    if (!ok || !uciLine.length) return null;
+    return { uci: uciLine, san: line.slice(0, uciLine.length) };
 }
 
 function parseUciBoardMove(uci) {
@@ -1737,7 +1738,9 @@ function parseUciBoardMove(uci) {
 }
 
 function pickRandomOpeningLine(lines) {
-    const compiled = lines.map((line) => ({ line, uci: compileOpeningLineToUci(line) })).filter((x) => x.uci && x.uci.length);
+    const compiled = lines
+        .map((line) => compileOpeningLineToUci(line))
+        .filter((x) => x && x.uci && x.uci.length);
     if (!compiled.length) return { line: lines[0] || [], uci: [] };
     return compiled[Math.floor(Math.random() * compiled.length)];
 }
@@ -1772,7 +1775,7 @@ async function startOpeningPractice() {
 
 function runOpeningPracticeTurn() {
     if (!isOpeningPractice || isGameOver) return;
-    while (openingIndex < openingCurrentLine.length && currentTurn !== openingPlayerColor) {
+    while (openingIndex < openingCurrentUciLine.length && currentTurn !== openingPlayerColor) {
         const uci = openingCurrentUciLine[openingIndex];
         const parsed = parseUciBoardMove(uci);
         if (!parsed) {
@@ -1788,7 +1791,7 @@ function runOpeningPracticeTurn() {
         handleActualMove(parsed.from, parsed.to, false, null);
         if (isGameOver) return;
     }
-    if (openingIndex >= openingCurrentLine.length) {
+    if (openingIndex >= openingCurrentUciLine.length) {
         appendChatMessage('System', 'Line complete! Loading another variation...', true);
         const picked = pickRandomOpeningLine(openingRepertoireLines);
         openingCurrentLine = picked.line;

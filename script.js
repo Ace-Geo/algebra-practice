@@ -29,6 +29,7 @@ let openingRepertoireLines = [];
 let openingCurrentLine = [];
 let openingIndex = 0;
 let openingPlayerColor = 'white';
+let openingCurrentUciLine = [];
 
 let spectatorRoster = [];
 let setupView = "menu";
@@ -1691,7 +1692,7 @@ function findMoveBySan(team, san) {
     }) || null;
 }
 
-function validateOpeningLinePlayable(line) {
+function compileOpeningLineToUci(line) {
     const saved = {
         boardState: boardState.map((r) => [...r]),
         currentTurn,
@@ -1703,10 +1704,12 @@ function validateOpeningLinePlayable(line) {
         isGameOver
     };
 
+    const uciLine = [];
     let ok = true;
     for (const san of line) {
         const mv = findMoveBySan(currentTurn, san);
         if (!mv) { ok = false; break; }
+        uciLine.push(moveToUci(mv));
         handleActualMove(mv.from, mv.to, false, null);
         if (isGameOver) break;
     }
@@ -1721,13 +1724,22 @@ function validateOpeningLinePlayable(line) {
     isGameOver = saved.isGameOver;
     selected = null;
 
-    return ok;
+    return ok ? uciLine : null;
+}
+
+function parseUciBoardMove(uci) {
+    if (!uci || uci.length < 4) return null;
+    const files = 'abcdefgh';
+    const from = { c: files.indexOf(uci[0]), r: 8 - Number(uci[1]) };
+    const to = { c: files.indexOf(uci[2]), r: 8 - Number(uci[3]) };
+    if (from.c < 0 || to.c < 0 || Number.isNaN(from.r) || Number.isNaN(to.r)) return null;
+    return { from, to };
 }
 
 function pickRandomOpeningLine(lines) {
-    const valid = lines.filter((l) => validateOpeningLinePlayable(l));
-    const pool = valid.length ? valid : lines;
-    return pool[Math.floor(Math.random() * pool.length)] || [];
+    const compiled = lines.map((line) => ({ line, uci: compileOpeningLineToUci(line) })).filter((x) => x.uci && x.uci.length);
+    if (!compiled.length) return { line: lines[0] || [], uci: [] };
+    return compiled[Math.floor(Math.random() * compiled.length)];
 }
 
 async function startOpeningPractice() {
@@ -1750,7 +1762,9 @@ async function startOpeningPractice() {
     blackName = color === 'black' ? 'You' : 'Repertoire';
     const overlay = document.getElementById('setup-overlay'); if (overlay) overlay.remove();
     initGameState();
-    openingCurrentLine = pickRandomOpeningLine(lines);
+    const picked = pickRandomOpeningLine(lines);
+    openingCurrentLine = picked.line;
+    openingCurrentUciLine = picked.uci;
     openingIndex = 0;
     initGameState();
     runOpeningPracticeTurn();
@@ -1759,22 +1773,26 @@ async function startOpeningPractice() {
 function runOpeningPracticeTurn() {
     if (!isOpeningPractice || isGameOver) return;
     while (openingIndex < openingCurrentLine.length && currentTurn !== openingPlayerColor) {
-        const san = openingCurrentLine[openingIndex];
-        const mv = findMoveBySan(currentTurn, san);
-        if (!mv) {
-            appendChatMessage('System', `Current repertoire move could not be resolved: ${san}. Loading another line...`, true);
-            openingCurrentLine = pickRandomOpeningLine(openingRepertoireLines);
+        const uci = openingCurrentUciLine[openingIndex];
+        const parsed = parseUciBoardMove(uci);
+        if (!parsed) {
+            appendChatMessage('System', 'Current repertoire move could not be resolved. Loading another line...', true);
+            const picked = pickRandomOpeningLine(openingRepertoireLines);
+            openingCurrentLine = picked.line;
+            openingCurrentUciLine = picked.uci;
             openingIndex = 0;
             initGameState();
             return setTimeout(runOpeningPracticeTurn, 100);
         }
         openingIndex++;
-        handleActualMove(mv.from, mv.to, false, null);
+        handleActualMove(parsed.from, parsed.to, false, null);
         if (isGameOver) return;
     }
     if (openingIndex >= openingCurrentLine.length) {
         appendChatMessage('System', 'Line complete! Loading another variation...', true);
-        openingCurrentLine = pickRandomOpeningLine(openingRepertoireLines);
+        const picked = pickRandomOpeningLine(openingRepertoireLines);
+        openingCurrentLine = picked.line;
+        openingCurrentUciLine = picked.uci;
         openingIndex = 0;
         initGameState();
         runOpeningPracticeTurn();
@@ -1787,7 +1805,9 @@ function handleOpeningPracticePlayerMove(from, to, promotionChoice) {
     const expectedMove = findMoveBySan(currentTurn, expected);
     if (!expectedMove) {
         appendChatMessage('System', `Could not resolve expected repertoire move: ${expected}. Loading another line...`, true);
-        openingCurrentLine = pickRandomOpeningLine(openingRepertoireLines);
+        const picked = pickRandomOpeningLine(openingRepertoireLines);
+        openingCurrentLine = picked.line;
+        openingCurrentUciLine = picked.uci;
         openingIndex = 0;
         initGameState();
         return setTimeout(runOpeningPracticeTurn, 100);

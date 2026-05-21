@@ -1573,6 +1573,15 @@ function getBuiltInLondonPgn() {
     return `1. d4 d5 (1... Nf6 2. Bf4 c5 (2... e6 3. e3 c5 4. c3 b6 5. Nf3 cxd4 (5... Bb7 6. h3 Be7 7. Nbd2 O-O 8. Bd3 d6 9. O-O Nbd7 10. Bh2 a6 11. a4 Qc7 12. Re1 Rfe8 13. e4 cxd4 14. cxd4 e5 15. Rc1 Qb8 16. Bc4 exd4 17. Bxf7+ Kxf7 18. Qb3+ Kf8 19. Ng5) 6. Nxd4 Nd5 (6... a6 7. Qf3 d5 (7... Nd5 8. c4 Nc7 9. Nc3 d6 10. O-O-O) 8. Bxb8 Rxb8 9. Nc6) 7. Bg3 a6 8. Qf3 d6 9. c4 Nc7 10. Nc3) (2... g6 3. e3 Bg7 4. h3 O-O 5. Nf3 d5 (5... d6 6. c3 c5 (6... Nfd7 7. Bh2 e5 8. Be2 Nc6 9. a4 f5 10. a5 a6 11. d5 Ne7 12. c4 e4 13. Nd4 Ne5 14. Nc3 g5 15. O-O N7g6 16. b4 Qe7 17. c5 Kh8 18. Rc1) 7. dxc5 dxc5 8. Qxd8 Rxd8 9. Nbd2 Nc6 10. Bc7 Rd7 11. Bh2 b6 12. Bb5 Bb7 13. Nc4 Rad8 14. a4 Ne4 15. O-O Rd5 16. Bc7 R8d7 17. Bxb6 axb6 18. Nxb6 Rd8 19. Nxd5 Rxd5 20. a5) 6. c3 c5 7. Nbd2 Nc6 8. dxc5 Nd7 9. Nb3 e5 10. Bg3 Ne7 11. Be2 Qc7 12. O-O a5 13. a4 Rd8 14. Rc1 b6 15. c4 Nxc5 16. Nxc5 bxc5 17. cxd5) 3. e3 Nd5 4. Bg3 Qb6 5. c4 Qxb2 6. cxd5 Qxa1 7. Qc2 Na6 8. Bxa6 bxa6 9. Nf3 d6 10. Bxd6 exd6 11. O-O Rb8 12. Nbd2 Qb2 13. Qe4+ Be7 14. Rb1 Qxb1+ 15. Nxb1 O-O 16. dxc5 dxc5 17. Nbd2) 2. Bf4 c5 (2... e6 3. e3 Nf6 4. Nd2 Bd6 (4... c5 5. c3 Nc6 6. Ngf3 Bd6 7. Bg3 O-O 8. Bd3 Qe7 (8... b6 9. e4 dxe4 10. Nxe4 Nxe4 11. Bxe4 Bb7 12. dxc5 Bxc5 13. Qa4 Rc8 14. Rd1 Qe7 15. O-O) 9. Ne5 Nd7 10. Nxd7 Bxd7 11. Bxd6 Qxd6 12. dxc5 Qxc5 13. Bxh7+ Kxh7 14. Qh5+ Kg8 15. Ne4 Qc4 16. Ng5 Rfd8 17. Qxf7+ Kh8 18. Qh5+ Kg8 19. Rd1) 5. Ngf3 O-O 6. Bd3 b6 7. Qe2 Bb7 8. O-O c5 9. c3 Ne4 10. Rfd1 Qe7 11. dxc5 Nxc5 12. Bxh7+ Kxh7 13. Ng5+ Kg6 14. Qg4 f5 15. Qg3 e5 16. Ndf3 exf4 17. exf4) (2... Nf6 3. e3 e6 4. Nd2 Bd6 5. Ngf3 c5 6. c3 Qc7 7. Bxd6 Qxd6 8. Ne5 Nc6 9. f4 O-O 10. Bd3 b6 11. O-O Bb7 12. g4 Ne7 13. Qf3) (2... Bf5 3. c4 e6 4. Nc3 c6 5. Qb3 Qb6 6. c5 Qxb3 7. axb3 Nd7 8. b4 a6 9. Nf3 Rc8 10. Nd2) 3. e3 Qb6 (3... Nf6 4. c3 Nc6 5. Nd2 Bf5 6. Qb3 Qb6 7. dxc5 Qxb3 8. axb3 e5 9. Bg3 Bxc5 10. Ngf3 Nd7 11. b4 Bd6 12. Nd4 Bg6 13. Nxc6 bxc6 14. f3) (3... Nc6 4. c3 Nf6 5. Nd2 cxd4 (5... e6 6. Ngf3 cxd4 7. exd4 Nh5 8. Be3 Bd6 9. g3 O-O 10. Bd3 f5 11. Ne5 Nf6 12. Ndf3 Ne4 13. Bf4 Qc7 14. O-O Bd7 15. Qc1 Be8 16. Nxc6 Bxf4 17. Ne7+) 6. exd4 Bf5 7. Qb3 Qd7 8. Ngf3 e6 9. Ne5 Qc8 10. Bd3 Nxe5 11. Bxf5 Ng6 12. Bxg6 hxg6 13. h3 Be7 14. O-O O-O 15. Nf3 Nd7 16. h4 Qc6 17. g3 Bd6 18. Bxd6 Qxd6 19. Kg2 Rab8 20. Rh1 Nf6 21. Ne5) 4. Nc3 Nf6 5. Nb5 Na6 6. c3 e6 7. a4 Bd7 8. Nf3 Be7 9. a5 Qd8 10. Nd6+ Bxd6 11. Bxd6 Ne4 12. Bf4 *`;
 }
 
+function getBuiltInLondonLines() {
+    return [
+        ['d4','d5','Bf4','c5','e3','Qb6','Nc3','Nf6','Nb5','Na6','c3','e6','a4','Bd7','Nf3','Be7','a5','Qd8','Nd6+','Bxd6','Bxd6','Ne4','Bf4'],
+        ['d4','d5','Bf4','c5','e3','Nf6','c3','Nc6','Nf3','Bd6','Bg3','O-O','Bd3','Qe7','Ne5','Nd7','Nxd7','Bxd7'],
+        ['d4','d5','Bf4','Nf6','e3','e6','Nd2','Bd6','Ngf3','c5','c3','Qc7','Bxd6','Qxd6','Ne5','Nc6','f4','O-O','Bd3','b6'],
+        ['d4','Nf6','Bf4','c5','e3','g6','h3','Bg7','Nf3','O-O','d5','d6','c3','c5','dxc5','dxc5','Qxd8','Rxd8']
+    ];
+}
+
 function tokenizePgnMoves(pgn) {
     return (pgn || '')
         .replace(/\{[^}]*\}/g, ' ')
@@ -1748,9 +1757,13 @@ function pickRandomOpeningLine(lines) {
 async function startOpeningPractice() {
     const color = document.getElementById('openingColor')?.value || 'white';
     const file = document.getElementById('openingPgnFile')?.files?.[0];
-    let pgn = getBuiltInLondonPgn();
-    if (file) pgn = await file.text();
-    const lines = extractPracticeLinesFromPgn(pgn);
+    let lines = [];
+    if (file) {
+        const pgn = await file.text();
+        lines = extractPracticeLinesFromPgn(pgn);
+    } else {
+        lines = getBuiltInLondonLines();
+    }
     if (!lines.length) return alert('Could not parse any opening lines from PGN.');
     openingRepertoireLines = lines;
     openingIndex = 0;

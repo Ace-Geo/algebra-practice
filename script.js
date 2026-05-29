@@ -32,6 +32,8 @@ let openingPlayerColor = 'white';
 let openingCurrentUciLine = [];
 let pieceDragState = null;
 let suppressBoardClickUntil = 0;
+let boardAnnotations = { squares: [], arrows: [] };
+let annotationDrag = null;
 
 let spectatorRoster = [];
 let setupView = "menu";
@@ -1156,6 +1158,133 @@ function boardToFen(board, turn) {
     return `${ranks.join('/')} ${turn === 'white' ? 'w' : 'b'} - - 0 1`;
 }
 
+
+function getAnnotationMode(e) {
+    if (e.altKey) return 'alt';
+    if (e.shiftKey) return 'shift';
+    if (e.ctrlKey || e.metaKey) return 'ctrl';
+    return 'normal';
+}
+
+function annotationKey(sq) {
+    return `${sq.r},${sq.c}`;
+}
+
+function isYellowSquare(r, c) {
+    return !!(selected && selected.r === r && selected.c === c) ||
+        !!(lastMoveHighlight && ((lastMoveHighlight.from.r === r && lastMoveHighlight.from.c === c) || (lastMoveHighlight.to.r === r && lastMoveHighlight.to.c === c)));
+}
+
+function getAnnotationSquareColor(r, c, mode) {
+    const light = (r + c) % 2 === 0;
+    const colors = {
+        normal: light ? '#EB7D6A' : '#D36C50',
+        ctrl: light ? '#FBB72A' : '#E3A610',
+        shift: light ? '#B9D471' : '#A1C357',
+        alt: light ? '#71BCDA' : '#59ABC0'
+    };
+    return colors[mode] || colors.normal;
+}
+
+function getAnnotationArrowColor(r, c, mode) {
+    const light = (r + c) % 2 === 0;
+    const yellow = isYellowSquare(r, c) || boardAnnotations.squares.some((a) => a.r === r && a.c === c);
+    const colors = {
+        normal: yellow ? '#E6B618' : (light ? '#F8C24B' : '#CCA31E'),
+        ctrl: yellow ? '#E27F40' : (light ? '#F48B73' : '#C86C46'),
+        shift: yellow ? '#A9CD40' : (light ? '#BBD973' : '#8FBA46'),
+        alt: yellow ? '#71C5B7' : (light ? '#83D1EA' : '#57B2BC')
+    };
+    return colors[mode] || colors.normal;
+}
+
+function toggleSquareAnnotation(sq, mode) {
+    const idx = boardAnnotations.squares.findIndex((a) => a.r === sq.r && a.c === sq.c && a.mode === mode);
+    if (idx >= 0) boardAnnotations.squares.splice(idx, 1);
+    else boardAnnotations.squares.push({ r: sq.r, c: sq.c, mode });
+}
+
+function toggleArrowAnnotation(from, to, mode) {
+    const idx = boardAnnotations.arrows.findIndex((a) => a.from.r === from.r && a.from.c === from.c && a.to.r === to.r && a.to.c === to.c && a.mode === mode);
+    if (idx >= 0) boardAnnotations.arrows.splice(idx, 1);
+    else boardAnnotations.arrows.push({ from: { ...from }, to: { ...to }, mode });
+}
+
+function getDisplayCenter(sq) {
+    const displayRow = boardPerspective === 'black' ? 7 - sq.r : sq.r;
+    const displayCol = boardPerspective === 'black' ? 7 - sq.c : sq.c;
+    return { x: displayCol * 74 + 37, y: displayRow * 74 + 37 };
+}
+
+function trimSegmentStart(a, b, amount) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    return { x: a.x + (dx / len) * amount, y: a.y + (dy / len) * amount };
+}
+
+function trimSegmentEnd(a, b, amount) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    return { x: b.x - (dx / len) * amount, y: b.y - (dy / len) * amount };
+}
+
+function buildArrowPath(arrow) {
+    const start = getDisplayCenter(arrow.from);
+    const end = getDisplayCenter(arrow.to);
+    const dRow = Math.abs(arrow.to.r - arrow.from.r);
+    const dCol = Math.abs(arrow.to.c - arrow.from.c);
+    const isKnight = (dRow === 2 && dCol === 1) || (dRow === 1 && dCol === 2);
+    if (!isKnight) {
+        const a = trimSegmentStart(start, end, 11);
+        const b = trimSegmentEnd(start, end, 11);
+        return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+    }
+
+    const startDisplay = getDisplayCenter(arrow.from);
+    const endDisplay = getDisplayCenter(arrow.to);
+    const displayDeltaX = endDisplay.x - startDisplay.x;
+    const displayDeltaY = endDisplay.y - startDisplay.y;
+    const corner = Math.abs(displayDeltaY) > Math.abs(displayDeltaX)
+        ? { x: startDisplay.x, y: endDisplay.y }
+        : { x: endDisplay.x, y: startDisplay.y };
+    const a = trimSegmentStart(startDisplay, corner, 11);
+    const b = trimSegmentEnd(corner, endDisplay, 11);
+    return `M ${a.x} ${a.y} L ${corner.x} ${corner.y} L ${b.x} ${b.y}`;
+}
+
+function renderArrowOverlay() {
+    if (!boardAnnotations.arrows.length) return '';
+    const defs = [];
+    const paths = [];
+    boardAnnotations.arrows.forEach((arrow, i) => {
+        const color = getAnnotationArrowColor(arrow.from.r, arrow.from.c, arrow.mode);
+        const id = `arrowhead-${i}`;
+        defs.push(`<marker id="${id}" markerWidth="37" markerHeight="37" refX="37" refY="18.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 37 18.5 L 0 37 Z" fill="${color}"></path></marker>`);
+        paths.push(`<path d="${buildArrowPath(arrow)}" stroke="${color}" stroke-width="16" fill="none" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#${id})"></path>`);
+    });
+    return `<svg class="annotation-layer" viewBox="0 0 592 592" aria-hidden="true"><defs>${defs.join('')}</defs>${paths.join('')}</svg>`;
+}
+
+function beginAnnotationDrag(e, sq) {
+    if (e.button !== 2) return;
+    e.preventDefault();
+    annotationDrag = { from: { ...sq }, mode: getAnnotationMode(e) };
+}
+
+function finishAnnotationDrag(e) {
+    if (!annotationDrag) return;
+    e.preventDefault();
+    const target = getBoardSquareFromClientPoint(e.clientX, e.clientY);
+    if (target) {
+        if (target.r === annotationDrag.from.r && target.c === annotationDrag.from.c) toggleSquareAnnotation(target, annotationDrag.mode);
+        else toggleArrowAnnotation(annotationDrag.from, target, annotationDrag.mode);
+        render();
+    }
+    annotationDrag = null;
+}
+
 function render(forcedStatus) {
     const layout = document.getElementById('main-layout');
     if (!layout) return;
@@ -1210,6 +1339,8 @@ function render(forcedStatus) {
     boardCont.id = 'board-container';
     const boardEl = document.createElement('div');
     boardEl.id = 'board';
+    boardEl.oncontextmenu = (e) => e.preventDefault();
+    boardEl.addEventListener('pointerup', finishAnnotationDrag);
 
     const check = isTeamInCheck(currentTurn, boardState);
     let hints = (selected && !isGameOver) ? getLegalMoves(currentTurn).filter(m => m.from.r === selected.r && m.from.c === selected.c).map(m => m.to) : [];
@@ -1222,6 +1353,8 @@ function render(forcedStatus) {
             if (selected && selected.r === r && selected.c === c) sq.classList.add('selected');
             if (lastMoveHighlight && lastMoveHighlight.from.r === r && lastMoveHighlight.from.c === c) sq.classList.add('last-from');
             if (lastMoveHighlight && lastMoveHighlight.to.r === r && lastMoveHighlight.to.c === c) sq.classList.add('last-to');
+            const squareAnnotation = boardAnnotations.squares.find((a) => a.r === r && a.c === c);
+            if (squareAnnotation) sq.style.backgroundColor = getAnnotationSquareColor(r, c, squareAnnotation.mode);
             if (hints.some(h => h.r === r && h.c === c)) {
                 const hint = document.createElement('div'); hint.className = boardState[r][c] === '' ? 'hint-dot' : 'hint-capture';
                 sq.appendChild(hint);
@@ -1234,6 +1367,7 @@ function render(forcedStatus) {
                 span.addEventListener('pointerdown', (e) => handlePiecePointerDown(e, r, c));
                 sq.appendChild(span);
             }
+            sq.addEventListener('pointerdown', (e) => beginAnnotationDrag(e, { r, c }));
             sq.onclick = async () => {
                 if (Date.now() < suppressBoardClickUntil) return;
                 if (isSpectator || isGameOver || currentTurn !== myColor) return;
@@ -1260,6 +1394,7 @@ function render(forcedStatus) {
             boardEl.appendChild(sq);
         }
     }
+    boardEl.insertAdjacentHTML('beforeend', renderArrowOverlay());
     boardCont.appendChild(boardEl); gameArea.appendChild(boardCont);
 
     gameArea.appendChild(createPlayerBar(bottomColor === 'white' ? whiteName : blackName, bottomColor));

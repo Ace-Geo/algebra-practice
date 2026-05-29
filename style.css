@@ -27,7 +27,7 @@ body { background: #302E2B; display: flex; align-items: center; justify-content:
 #chat-send-btn { background: linear-gradient(135deg, #ff9f43, #ff7b54); border: none; color: white; padding: 0 12px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: transform 0.16s ease, filter 0.16s ease; }
 #game-area { display: flex; flex-direction: column; width: 592px; margin-top: 3px; }
 #board-container { background: transparent; padding: 0; box-sizing: border-box; border-radius: 0; border: none; }
-#board { display: grid; grid-template-columns: repeat(8, 74px); grid-template-rows: repeat(8, 74px); width: 592px; height: 592px; position: relative; }
+#board { display: grid; grid-template-columns: repeat(8, 74px); grid-template-rows: repeat(8, 74px); width: 592px; height: 592px; position: relative; border-radius: 3px; overflow: hidden; }
 .square { width: 74px; height: 74px; display: flex; justify-content: center; align-items: center; position: relative; cursor: pointer; }
 .white-sq { background: #EBECD0; }
 .black-sq { background: #739552; }

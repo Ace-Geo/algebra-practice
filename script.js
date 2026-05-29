@@ -1582,25 +1582,46 @@ function getBoardSquareFromClientPoint(clientX, clientY) {
     return { r: displayRow, c: displayCol };
 }
 
-function updateDragGhostEdge(clientX, clientY) {
-    if (!pieceDragState?.ghost) return;
+function updateDragTargetEdge(clientX, clientY) {
+    if (!pieceDragState) return;
+    const boardEl = document.getElementById('board');
     const sq = getBoardSquareFromClientPoint(clientX, clientY);
-    pieceDragState.ghost.classList.remove('edge-light', 'edge-dark', 'edge-light-yellow', 'edge-dark-yellow');
-    if (!sq) {
-        pieceDragState.ghost.classList.add('edge-light');
+    if (!boardEl || !sq) {
+        if (pieceDragState.edge) pieceDragState.edge.style.display = 'none';
         return;
     }
+
+    if (!pieceDragState.edge) {
+        const edge = document.createElement('div');
+        edge.className = 'drag-square-edge';
+        document.body.appendChild(edge);
+        pieceDragState.edge = edge;
+    }
+
+    const rect = boardEl.getBoundingClientRect();
+    const cellW = rect.width / 8;
+    const cellH = rect.height / 8;
+    const displayRow = boardPerspective === 'black' ? 7 - sq.r : sq.r;
+    const displayCol = boardPerspective === 'black' ? 7 - sq.c : sq.c;
+    const edge = pieceDragState.edge;
+    edge.style.display = 'block';
+    edge.style.left = `${rect.left + displayCol * cellW}px`;
+    edge.style.top = `${rect.top + displayRow * cellH}px`;
+    edge.style.width = `${cellW}px`;
+    edge.style.height = `${cellH}px`;
+
+    edge.classList.remove('edge-light', 'edge-dark', 'edge-light-yellow', 'edge-dark-yellow');
     const isLight = (sq.r + sq.c) % 2 === 0;
     const isYellow = !!(selected && selected.r === sq.r && selected.c === sq.c) ||
         !!(lastMoveHighlight && ((lastMoveHighlight.from.r === sq.r && lastMoveHighlight.from.c === sq.c) || (lastMoveHighlight.to.r === sq.r && lastMoveHighlight.to.c === sq.c)));
-    pieceDragState.ghost.classList.add(isYellow ? (isLight ? 'edge-light-yellow' : 'edge-dark-yellow') : (isLight ? 'edge-light' : 'edge-dark'));
+    edge.classList.add(isYellow ? (isLight ? 'edge-light-yellow' : 'edge-dark-yellow') : (isLight ? 'edge-light' : 'edge-dark'));
 }
 
 function moveDragGhost(clientX, clientY) {
     if (!pieceDragState?.ghost) return;
     pieceDragState.ghost.style.left = `${clientX}px`;
     pieceDragState.ghost.style.top = `${clientY}px`;
-    updateDragGhostEdge(clientX, clientY);
+    updateDragTargetEdge(clientX, clientY);
 }
 
 function beginPieceDrag(e, r, c) {
@@ -1611,7 +1632,8 @@ function beginPieceDrag(e, r, c) {
         startX: e.clientX,
         startY: e.clientY,
         active: false,
-        ghost: null
+        ghost: null,
+        edge: null
     };
 }
 
@@ -1621,7 +1643,7 @@ function activatePieceDrag(e) {
     selected = { ...pieceDragState.from };
     render();
     const ghost = document.createElement('div');
-    ghost.className = `drag-ghost ${getPieceTextureClass(pieceDragState.piece)}`;
+    ghost.className = `drag-ghost textured-piece ${getPieceTextureClass(pieceDragState.piece)}`;
     document.body.appendChild(ghost);
     document.body.classList.add('dragging-piece');
     pieceDragState.ghost = ghost;
@@ -1650,6 +1672,7 @@ async function finishPieceDrag(e) {
     if (!state.active) return;
     suppressBoardClickUntil = Date.now() + 250;
     if (state.ghost) state.ghost.remove();
+    if (state.edge) state.edge.remove();
     const target = getBoardSquareFromClientPoint(e.clientX, e.clientY);
     if (!target) {
         selected = null;

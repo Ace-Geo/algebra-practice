@@ -1186,14 +1186,12 @@ function getAnnotationSquareColor(r, c, mode) {
     return colors[mode] || colors.normal;
 }
 
-function getAnnotationArrowColor(r, c, mode) {
-    const light = (r + c) % 2 === 0;
-    const yellow = isYellowSquare(r, c) || boardAnnotations.squares.some((a) => a.r === r && a.c === c);
+function getAnnotationArrowColor(mode) {
     const colors = {
-        normal: yellow ? '#E6B618' : (light ? '#F8C24B' : '#CCA31E'),
-        ctrl: yellow ? '#E27F40' : (light ? '#F48B73' : '#C86C46'),
-        shift: yellow ? '#A9CD40' : (light ? '#BBD973' : '#8FBA46'),
-        alt: yellow ? '#71C5B7' : (light ? '#83D1EA' : '#57B2BC')
+        normal: '#F8C24B',
+        ctrl: '#F48B73',
+        shift: '#BBD973',
+        alt: '#83D1EA'
     };
     return colors[mode] || colors.normal;
 }
@@ -1208,6 +1206,12 @@ function toggleArrowAnnotation(from, to, mode) {
     const idx = boardAnnotations.arrows.findIndex((a) => a.from.r === from.r && a.from.c === from.c && a.to.r === to.r && a.to.c === to.c && a.mode === mode);
     if (idx >= 0) boardAnnotations.arrows.splice(idx, 1);
     else boardAnnotations.arrows.push({ from: { ...from }, to: { ...to }, mode });
+}
+
+function clearBoardAnnotations() {
+    const hadAnnotations = boardAnnotations.squares.length || boardAnnotations.arrows.length;
+    boardAnnotations = { squares: [], arrows: [] };
+    return !!hadAnnotations;
 }
 
 function getDisplayCenter(sq) {
@@ -1230,41 +1234,54 @@ function trimSegmentEnd(a, b, amount) {
     return { x: b.x - (dx / len) * amount, y: b.y - (dy / len) * amount };
 }
 
-function buildArrowPath(arrow) {
+function getArrowHeadPoints(base, tip, width = 37) {
+    const dx = tip.x - base.x;
+    const dy = tip.y - base.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len;
+    const ny = dx / len;
+    const half = width / 2;
+    return {
+        left: { x: base.x + nx * half, y: base.y + ny * half },
+        right: { x: base.x - nx * half, y: base.y - ny * half }
+    };
+}
+
+function buildArrowGeometry(arrow) {
     const start = getDisplayCenter(arrow.from);
     const end = getDisplayCenter(arrow.to);
     const dRow = Math.abs(arrow.to.r - arrow.from.r);
     const dCol = Math.abs(arrow.to.c - arrow.from.c);
     const isKnight = (dRow === 2 && dCol === 1) || (dRow === 1 && dCol === 2);
+    const headLength = 26;
+
     if (!isKnight) {
-        const a = trimSegmentStart(start, end, 11);
-        const b = trimSegmentEnd(start, end, 11);
-        return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+        const shaftStart = trimSegmentStart(start, end, 11);
+        const headBase = trimSegmentEnd(start, end, headLength);
+        return { shaftPath: `M ${shaftStart.x} ${shaftStart.y} L ${headBase.x} ${headBase.y}`, headBase, tip: end };
     }
 
-    const startDisplay = getDisplayCenter(arrow.from);
-    const endDisplay = getDisplayCenter(arrow.to);
-    const displayDeltaX = endDisplay.x - startDisplay.x;
-    const displayDeltaY = endDisplay.y - startDisplay.y;
+    const displayDeltaX = end.x - start.x;
+    const displayDeltaY = end.y - start.y;
     const corner = Math.abs(displayDeltaY) > Math.abs(displayDeltaX)
-        ? { x: startDisplay.x, y: endDisplay.y }
-        : { x: endDisplay.x, y: startDisplay.y };
-    const a = trimSegmentStart(startDisplay, corner, 11);
-    const b = trimSegmentEnd(corner, endDisplay, 11);
-    return `M ${a.x} ${a.y} L ${corner.x} ${corner.y} L ${b.x} ${b.y}`;
+        ? { x: start.x, y: end.y }
+        : { x: end.x, y: start.y };
+    const shaftStart = trimSegmentStart(start, corner, 11);
+    const headBase = trimSegmentEnd(corner, end, headLength);
+    return { shaftPath: `M ${shaftStart.x} ${shaftStart.y} L ${corner.x} ${corner.y} L ${headBase.x} ${headBase.y}`, headBase, tip: end };
 }
 
 function renderArrowOverlay() {
     if (!boardAnnotations.arrows.length) return '';
-    const defs = [];
-    const paths = [];
-    boardAnnotations.arrows.forEach((arrow, i) => {
-        const color = getAnnotationArrowColor(arrow.from.r, arrow.from.c, arrow.mode);
-        const id = `arrowhead-${i}`;
-        defs.push(`<marker id="${id}" markerWidth="37" markerHeight="37" refX="37" refY="18.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 37 18.5 L 0 37 Z" fill="${color}"></path></marker>`);
-        paths.push(`<path d="${buildArrowPath(arrow)}" stroke="${color}" stroke-width="16" fill="none" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#${id})"></path>`);
+    const parts = [];
+    boardAnnotations.arrows.forEach((arrow) => {
+        const color = getAnnotationArrowColor(arrow.mode);
+        const geom = buildArrowGeometry(arrow);
+        const head = getArrowHeadPoints(geom.headBase, geom.tip);
+        parts.push(`<path d="${geom.shaftPath}" stroke="${color}" stroke-width="16" fill="none" stroke-linecap="butt" stroke-linejoin="miter"></path>`);
+        parts.push(`<polygon points="${geom.tip.x},${geom.tip.y} ${head.left.x},${head.left.y} ${head.right.x},${head.right.y}" fill="${color}"></polygon>`);
     });
-    return `<svg class="annotation-layer" viewBox="0 0 592 592" aria-hidden="true"><defs>${defs.join('')}</defs>${paths.join('')}</svg>`;
+    return `<svg class="annotation-layer" viewBox="0 0 592 592" aria-hidden="true">${parts.join('')}</svg>`;
 }
 
 function beginAnnotationDrag(e, sq) {
@@ -1370,7 +1387,8 @@ function render(forcedStatus) {
             sq.addEventListener('pointerdown', (e) => beginAnnotationDrag(e, { r, c }));
             sq.onclick = async () => {
                 if (Date.now() < suppressBoardClickUntil) return;
-                if (isSpectator || isGameOver || currentTurn !== myColor) return;
+                const clearedAnnotations = clearBoardAnnotations();
+                if (isSpectator || isGameOver || currentTurn !== myColor) { if (clearedAnnotations) render(); return; }
                 if (selected) {
                     if (hints.some(h => h.r === r && h.c === c)) {
                         const piece = boardState[selected.r][selected.c];
@@ -1388,6 +1406,8 @@ function render(forcedStatus) {
                     }
                 } else if (getTeam(boardState[r][c]) === currentTurn) {
                     selected = { r, c };
+                    render();
+                } else if (clearedAnnotations) {
                     render();
                 }
             };

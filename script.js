@@ -30,6 +30,8 @@ let openingCurrentLine = [];
 let openingIndex = 0;
 let openingPlayerColor = 'white';
 let openingCurrentUciLine = [];
+let pieceDragState = null;
+let suppressBoardClickUntil = 0;
 
 let spectatorRoster = [];
 let setupView = "menu";
@@ -1228,9 +1230,12 @@ function render(forcedStatus) {
                 const span = document.createElement('span');
                 const pieceClass = getPieceTextureClass(boardState[r][c]);
                 span.className = `piece textured-piece ${pieceClass}`;
+                if (pieceDragState?.active && pieceDragState.from.r === r && pieceDragState.from.c === c) span.classList.add('drag-hidden');
+                span.addEventListener('pointerdown', (e) => handlePiecePointerDown(e, r, c));
                 sq.appendChild(span);
             }
             sq.onclick = async () => {
+                if (Date.now() < suppressBoardClickUntil) return;
                 if (isSpectator || isGameOver || currentTurn !== myColor) return;
                 if (selected) {
                     if (hints.some(h => h.r === r && h.c === c)) {
@@ -1558,6 +1563,119 @@ function getPieceTextureClass(piece) {
         '♚': 'black-king', '♛': 'black-queen', '♜': 'black-rook', '♝': 'black-bishop', '♞': 'black-knight', '♟': 'black-pawn'
     };
     return map[piece] || '';
+}
+
+
+function canInteractWithBoardPiece(r, c) {
+    return !isSpectator && !isGameOver && currentTurn === myColor && getTeam(boardState[r][c]) === currentTurn;
+}
+
+function getBoardSquareFromClientPoint(clientX, clientY) {
+    const boardEl = document.getElementById('board');
+    if (!boardEl) return null;
+    const rect = boardEl.getBoundingClientRect();
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+    const displayCol = Math.floor((clientX - rect.left) / (rect.width / 8));
+    const displayRow = Math.floor((clientY - rect.top) / (rect.height / 8));
+    if (displayCol < 0 || displayCol > 7 || displayRow < 0 || displayRow > 7) return null;
+    if (boardPerspective === 'black') return { r: 7 - displayRow, c: 7 - displayCol };
+    return { r: displayRow, c: displayCol };
+}
+
+function updateDragGhostEdge(clientX, clientY) {
+    if (!pieceDragState?.ghost) return;
+    const sq = getBoardSquareFromClientPoint(clientX, clientY);
+    pieceDragState.ghost.classList.remove('edge-light', 'edge-dark', 'edge-light-yellow', 'edge-dark-yellow');
+    if (!sq) {
+        pieceDragState.ghost.classList.add('edge-light');
+        return;
+    }
+    const isLight = (sq.r + sq.c) % 2 === 0;
+    const isYellow = !!(selected && selected.r === sq.r && selected.c === sq.c) ||
+        !!(lastMoveHighlight && ((lastMoveHighlight.from.r === sq.r && lastMoveHighlight.from.c === sq.c) || (lastMoveHighlight.to.r === sq.r && lastMoveHighlight.to.c === sq.c)));
+    pieceDragState.ghost.classList.add(isYellow ? (isLight ? 'edge-light-yellow' : 'edge-dark-yellow') : (isLight ? 'edge-light' : 'edge-dark'));
+}
+
+function moveDragGhost(clientX, clientY) {
+    if (!pieceDragState?.ghost) return;
+    pieceDragState.ghost.style.left = `${clientX}px`;
+    pieceDragState.ghost.style.top = `${clientY}px`;
+    updateDragGhostEdge(clientX, clientY);
+}
+
+function beginPieceDrag(e, r, c) {
+    if (!canInteractWithBoardPiece(r, c)) return;
+    pieceDragState = {
+        from: { r, c },
+        piece: boardState[r][c],
+        startX: e.clientX,
+        startY: e.clientY,
+        active: false,
+        ghost: null
+    };
+}
+
+function activatePieceDrag(e) {
+    if (!pieceDragState || pieceDragState.active) return;
+    pieceDragState.active = true;
+    selected = { ...pieceDragState.from };
+    render();
+    const ghost = document.createElement('div');
+    ghost.className = `drag-ghost ${getPieceTextureClass(pieceDragState.piece)}`;
+    document.body.appendChild(ghost);
+    document.body.classList.add('dragging-piece');
+    pieceDragState.ghost = ghost;
+    moveDragGhost(e.clientX, e.clientY);
+}
+
+function handlePiecePointerMove(e) {
+    if (!pieceDragState) return;
+    const dx = e.clientX - pieceDragState.startX;
+    const dy = e.clientY - pieceDragState.startY;
+    if (!pieceDragState.active && Math.hypot(dx, dy) > 5) activatePieceDrag(e);
+    if (pieceDragState.active) {
+        e.preventDefault();
+        moveDragGhost(e.clientX, e.clientY);
+    }
+}
+
+async function finishPieceDrag(e) {
+    if (!pieceDragState) return;
+    const state = pieceDragState;
+    pieceDragState = null;
+    document.removeEventListener('pointermove', handlePiecePointerMove);
+    document.removeEventListener('pointerup', finishPieceDrag);
+    document.body.classList.remove('dragging-piece');
+
+    if (!state.active) return;
+    suppressBoardClickUntil = Date.now() + 250;
+    if (state.ghost) state.ghost.remove();
+    const target = getBoardSquareFromClientPoint(e.clientX, e.clientY);
+    if (!target) {
+        selected = null;
+        render();
+        return;
+    }
+    const legal = getLegalMoves(currentTurn).some((m) => m.from.r === state.from.r && m.from.c === state.from.c && m.to.r === target.r && m.to.c === target.c);
+    if (!legal) {
+        selected = null;
+        render();
+        return;
+    }
+    const piece = boardState[state.from.r][state.from.c];
+    const team = getTeam(piece);
+    let promotionChoice = null;
+    const isPromotionMove = (piece === '♙' && team === 'white' && target.r === 0) || (piece === '♟' && team === 'black' && target.r === 7);
+    if (isPromotionMove) promotionChoice = await choosePromotionPiece(team);
+    handleOpeningPracticePlayerMove(state.from, target, promotionChoice);
+}
+
+function handlePiecePointerDown(e, r, c) {
+    if (e.button !== undefined && e.button !== 0) return;
+    beginPieceDrag(e, r, c);
+    if (!pieceDragState) return;
+    document.addEventListener('pointermove', handlePiecePointerMove);
+    document.addEventListener('pointerup', finishPieceDrag, { once: true });
 }
 
 function setSetupView(view) {

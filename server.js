@@ -159,7 +159,8 @@ function buildActiveGames() {
             whiteName: room.players.whiteName || "White",
             blackName: room.players.blackName || "Black",
             settings: room.settings,
-            boardState: room.lastSpectatorState?.boardState || null
+            boardState: room.lastSpectatorState?.boardState || null,
+            isBotGame: !!room.isBotGame
         }));
 }
 
@@ -181,6 +182,31 @@ io.on("connection", (socket) => {
             reconnectDeadline: null
         };
         socket.emit("room-created", { password });
+    });
+
+    socket.on("register-bot-game", (data) => {
+        const { password, humanColor, whiteName, blackName, settings, state } = data || {};
+        if (!password || (humanColor !== "white" && humanColor !== "black")) return;
+        socket.join(password);
+        rooms[password] = {
+            creatorId: socket.id,
+            creatorName: humanColor === "white" ? whiteName : blackName,
+            settings: settings || { mins: 0, secs: 0, inc: 0, variant: "standard" },
+            status: "active",
+            players: {
+                white: humanColor === "white" ? socket.id : `bot:${password}:white`,
+                black: humanColor === "black" ? socket.id : `bot:${password}:black`,
+                whiteName: whiteName || "White",
+                blackName: blackName || "Black",
+                whiteAdmin: false,
+                blackAdmin: false
+            },
+            spectators: {},
+            reconnectDeadline: null,
+            isBotGame: true,
+            botOwnerId: socket.id,
+            lastSpectatorState: state || null
+        };
     });
 
     socket.on("join-attempt", (data) => {
@@ -617,6 +643,10 @@ io.on("connection", (socket) => {
             blackName: room.players.blackName
         });
 
+        if (room.lastSpectatorState) {
+            socket.emit("spectator-state-sync", { state: room.lastSpectatorState });
+        }
+
         emitSpectatorList(password);
         if (!silent) {
             io.in(password).emit("receive-chat", {
@@ -625,14 +655,17 @@ io.on("connection", (socket) => {
             });
         }
 
-        io.to(room.players.white).emit("spectator-sync-needed", { requesterId: socket.id });
-        io.to(room.players.black).emit("spectator-sync-needed", { requesterId: socket.id });
+        [room.players.white, room.players.black].forEach((playerId) => {
+            if (playerId && !String(playerId).startsWith("bot:")) {
+                io.to(playerId).emit("spectator-sync-needed", { requesterId: socket.id });
+            }
+        });
     });
 
     socket.on("spectator-state-sync", (data) => {
         const room = rooms[data.password];
         if (room && data.state) room.lastSpectatorState = data.state;
-        io.to(data.targetSocketId).emit("spectator-state-sync", { state: data.state });
+        if (data.targetSocketId) io.to(data.targetSocketId).emit("spectator-state-sync", { state: data.state });
     });
 
     socket.on("self-admin-enabled", (data) => {
@@ -664,6 +697,12 @@ io.on("connection", (socket) => {
             black: { name: room.players.blackName || "Black", isAdmin: !!room.players.blackAdmin },
             spectators: buildSpectatorList(room)
         });
+    });
+
+    socket.on("bot-game-state-sync", (data) => {
+        const room = rooms[data.password];
+        if (!room || !room.isBotGame || room.botOwnerId !== socket.id || !data.state) return;
+        room.lastSpectatorState = data.state;
     });
 
     socket.on("send-move", (data) => {
@@ -775,7 +814,11 @@ io.on("connection", (socket) => {
 
             const isPlayer = room.creatorId === socket.id || room.players.white === socket.id || room.players.black === socket.id;
             if (isPlayer) {
-                if (room.status === "active") {
+                if (room.isBotGame && room.botOwnerId === socket.id) {
+                    io.in(roomPass).emit("room-closed", { message: "The bot game ended because the player disconnected." });
+                    delete rooms[roomPass];
+                    if (roomRematchStates[roomPass]) delete roomRematchStates[roomPass];
+                } else if (room.status === "active") {
                     const isWhite = room.players.white === socket.id;
                     const isBlack = room.players.black === socket.id;
                     if (isWhite) room.players.white = null;

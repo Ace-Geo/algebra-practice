@@ -31,12 +31,12 @@ body { background: #302E2B; display: flex; align-items: center; justify-content:
 .square { width: 74px; height: 74px; display: flex; justify-content: center; align-items: center; position: relative; cursor: pointer; }
 .white-sq { background: #EBECD0; }
 .black-sq { background: #739552; }
-.selected.white-sq { background: #F5F682 !important; }
-.selected.black-sq { background: #B9CA43 !important; }
-.last-from.white-sq { background: #F5F682 !important; }
-.last-from.black-sq { background: #B9CA43 !important; }
-.last-to.white-sq { background: #F5F682 !important; }
-.last-to.black-sq { background: #B9CA43 !important; }
+.selected.white-sq { background: rgba(255, 255, 51, 0.5) !important; }
+.selected.black-sq { background: rgba(255, 255, 51, 0.5) !important; }
+.last-from.white-sq { background: rgba(255, 255, 51, 0.5) !important; }
+.last-from.black-sq { background: rgba(255, 255, 51, 0.5) !important; }
+.last-to.white-sq { background: rgba(255, 255, 51, 0.5) !important; }
+.last-to.black-sq { background: rgba(255, 255, 51, 0.5) !important; }
 .king-check { background: #e66b6b !important; }
 .piece { font-size: 50px; user-select: none; z-index: 5; line-height: 1; }
 .w-piece { color: #fff; text-shadow: 1px 1px 2px #000; }
@@ -163,3 +163,5 @@ body.dragging-piece { cursor: grabbing; }
 
 .annotation-layer { position: absolute; inset: 0; width: 592px; height: 592px; pointer-events: none; z-index: 20; overflow: visible; }
 .highlight { position: absolute; inset: 0; opacity: 0.8; pointer-events: none; z-index: 3; }
+
+.premove-highlight { z-index: 4; }

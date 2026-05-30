@@ -161,4 +161,5 @@ body.coup-mode #main-layout { width: 100%; max-width: none; display: block; }
 .piece.drag-hidden { opacity: 0; }
 body.dragging-piece { cursor: grabbing; }
 
-.annotation-layer { position: absolute; inset: 0; width: 592px; height: 592px; pointer-events: none; z-index: 4; overflow: visible; }
+.annotation-layer { position: absolute; inset: 0; width: 592px; height: 592px; pointer-events: none; z-index: 20; overflow: visible; }
+.highlight { position: absolute; inset: 0; opacity: 0.8; pointer-events: none; z-index: 3; }

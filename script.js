@@ -1175,37 +1175,44 @@ function isYellowSquare(r, c) {
         !!(lastMoveHighlight && ((lastMoveHighlight.from.r === r && lastMoveHighlight.from.c === c) || (lastMoveHighlight.to.r === r && lastMoveHighlight.to.c === c)));
 }
 
-function getAnnotationSquareColor(r, c, mode) {
-    const light = (r + c) % 2 === 0;
+function getAnnotationSquareColor(mode) {
     const colors = {
-        normal: light ? '#EB7D6A' : '#D36C50',
-        ctrl: light ? '#FBB72A' : '#E3A610',
-        shift: light ? '#B9D471' : '#A1C357',
-        alt: light ? '#71BCDA' : '#59ABC0'
+        normal: 'rgba(235, 97, 80, 0.8)',
+        ctrl: 'rgba(255, 170, 0, 0.8)',
+        shift: 'rgba(172, 206, 89, 0.8)',
+        alt: 'rgba(82, 176, 220, 0.8)'
     };
     return colors[mode] || colors.normal;
 }
 
 function getAnnotationArrowColor(mode) {
     const colors = {
-        normal: '#F8C24B',
-        ctrl: '#F48B73',
-        shift: '#BBD973',
-        alt: '#83D1EA'
+        normal: 'rgba(255, 170, 0, 0.8)',
+        ctrl: 'rgba(248, 85, 63, 0.8)',
+        shift: 'rgba(159, 207, 63, 0.8)',
+        alt: 'rgba(72, 193, 249, 0.8)'
     };
     return colors[mode] || colors.normal;
 }
 
 function toggleSquareAnnotation(sq, mode) {
-    const idx = boardAnnotations.squares.findIndex((a) => a.r === sq.r && a.c === sq.c && a.mode === mode);
-    if (idx >= 0) boardAnnotations.squares.splice(idx, 1);
-    else boardAnnotations.squares.push({ r: sq.r, c: sq.c, mode });
+    const idx = boardAnnotations.squares.findIndex((a) => a.r === sq.r && a.c === sq.c);
+    if (idx >= 0) {
+        if (boardAnnotations.squares[idx].mode === mode) boardAnnotations.squares.splice(idx, 1);
+        else boardAnnotations.squares[idx] = { r: sq.r, c: sq.c, mode };
+    } else {
+        boardAnnotations.squares.push({ r: sq.r, c: sq.c, mode });
+    }
 }
 
 function toggleArrowAnnotation(from, to, mode) {
-    const idx = boardAnnotations.arrows.findIndex((a) => a.from.r === from.r && a.from.c === from.c && a.to.r === to.r && a.to.c === to.c && a.mode === mode);
-    if (idx >= 0) boardAnnotations.arrows.splice(idx, 1);
-    else boardAnnotations.arrows.push({ from: { ...from }, to: { ...to }, mode });
+    const idx = boardAnnotations.arrows.findIndex((a) => a.from.r === from.r && a.from.c === from.c && a.to.r === to.r && a.to.c === to.c);
+    if (idx >= 0) {
+        if (boardAnnotations.arrows[idx].mode === mode) boardAnnotations.arrows.splice(idx, 1);
+        else boardAnnotations.arrows[idx] = { from: { ...from }, to: { ...to }, mode };
+    } else {
+        boardAnnotations.arrows.push({ from: { ...from }, to: { ...to }, mode });
+    }
 }
 
 function clearBoardAnnotations() {
@@ -1218,6 +1225,12 @@ function getDisplayCenter(sq) {
     const displayRow = boardPerspective === 'black' ? 7 - sq.r : sq.r;
     const displayCol = boardPerspective === 'black' ? 7 - sq.c : sq.c;
     return { x: displayCol * 74 + 37, y: displayRow * 74 + 37 };
+}
+
+function getDisplayTopLeft(sq) {
+    const displayRow = boardPerspective === 'black' ? 7 - sq.r : sq.r;
+    const displayCol = boardPerspective === 'black' ? 7 - sq.c : sq.c;
+    return { x: displayCol * 74, y: displayRow * 74 };
 }
 
 function trimSegmentStart(a, b, amount) {
@@ -1278,8 +1291,8 @@ function renderArrowOverlay() {
         const color = getAnnotationArrowColor(arrow.mode);
         const geom = buildArrowGeometry(arrow);
         const head = getArrowHeadPoints(geom.headBase, geom.tip);
-        parts.push(`<path d="${geom.shaftPath}" stroke="${color}" stroke-width="16" fill="none" stroke-linecap="butt" stroke-linejoin="miter"></path>`);
-        parts.push(`<polygon points="${geom.tip.x},${geom.tip.y} ${head.left.x},${head.left.y} ${head.right.x},${head.right.y}" fill="${color}"></polygon>`);
+        parts.push(`<path class="arrow" d="${geom.shaftPath}" style="stroke: ${color}; opacity: 0.8;" stroke-width="16" fill="none" stroke-linecap="butt" stroke-linejoin="miter"></path>`);
+        parts.push(`<polygon id="arrow-${arrow.from.r}-${arrow.from.c}-${arrow.to.r}-${arrow.to.c}" data-arrow="${arrow.from.r},${arrow.from.c}-${arrow.to.r},${arrow.to.c}" class="arrow" points="${geom.tip.x},${geom.tip.y} ${head.left.x},${head.left.y} ${head.right.x},${head.right.y}" style="fill: ${color}; opacity: 0.8;"></polygon>`);
     });
     return `<svg class="annotation-layer" viewBox="0 0 592 592" aria-hidden="true">${parts.join('')}</svg>`;
 }
@@ -1371,7 +1384,14 @@ function render(forcedStatus) {
             if (lastMoveHighlight && lastMoveHighlight.from.r === r && lastMoveHighlight.from.c === c) sq.classList.add('last-from');
             if (lastMoveHighlight && lastMoveHighlight.to.r === r && lastMoveHighlight.to.c === c) sq.classList.add('last-to');
             const squareAnnotation = boardAnnotations.squares.find((a) => a.r === r && a.c === c);
-            if (squareAnnotation) sq.style.backgroundColor = getAnnotationSquareColor(r, c, squareAnnotation.mode);
+            if (squareAnnotation) {
+                const highlight = document.createElement('div');
+                highlight.className = `highlight square-${r}${c}`;
+                highlight.style.backgroundColor = getAnnotationSquareColor(squareAnnotation.mode);
+                highlight.dataset.testElement = 'highlight';
+                highlight.dataset.testType = 'highlight';
+                sq.appendChild(highlight);
+            }
             if (hints.some(h => h.r === r && h.c === c)) {
                 const hint = document.createElement('div'); hint.className = boardState[r][c] === '' ? 'hint-dot' : 'hint-capture';
                 sq.appendChild(hint);

@@ -165,3 +165,7 @@ body.dragging-piece { cursor: grabbing; }
 .highlight { position: absolute; inset: 0; opacity: 0.8; pointer-events: none; z-index: 3; }
 
 .premove-highlight { z-index: 4; }
+.premove-promotion-window { position: fixed; width: 74px; height: 333px; border-radius: 3px; overflow: hidden; z-index: 6000; box-shadow: 0 6px 18px rgba(0,0,0,0.35); }
+.premove-promotion-choice { width: 74px; height: 74px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: #ffffff; cursor: pointer; }
+.premove-promotion-choice .piece { pointer-events: none; }
+.premove-promotion-close { width: 74px; height: 37px; border: 0; padding: 0; background: #f1f1f1; color: #8b8987; font-size: 21px; line-height: 37px; cursor: pointer; }

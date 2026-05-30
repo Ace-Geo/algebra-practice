@@ -34,6 +34,7 @@ let pieceDragState = null;
 let suppressBoardClickUntil = 0;
 let queuedPremoves = [];
 let premovePromotionResolve = null;
+let promotionResolve = null;
 let timerLastTick = null;
 let boardAnnotations = { squares: [], arrows: [] };
 let annotationDrag = null;
@@ -193,22 +194,7 @@ socket.on("spectator-sync-needed", (data) => {
     socket.emit("spectator-state-sync", {
         password: currentPassword,
         targetSocketId: data.requesterId,
-        state: {
-            boardState,
-            currentTurn,
-            hasMoved,
-            enPassantTarget,
-            selected: null,
-            isGameOver,
-            isInfinite,
-            isPaused,
-            whiteTime,
-            blackTime,
-            increment,
-            moveHistory,
-            positionCounts,
-            halfmoveClock
-        }
+        state: getCurrentChessState()
     });
 });
 
@@ -228,6 +214,7 @@ socket.on("spectator-state-sync", (data) => {
     moveHistory = data.state.moveHistory || [];
     positionCounts = data.state.positionCounts || {};
     halfmoveClock = data.state.halfmoveClock || 0;
+    lastMoveHighlight = data.state.lastMoveHighlight || null;
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     if (!isInfinite) startTimer();
     render();
@@ -391,23 +378,7 @@ socket.on("chess-state-sync-request", (data) => {
     socket.emit("chess-state-sync", {
         password: currentPassword,
         targetSocketId: data.requesterId,
-        state: {
-            boardState,
-            currentTurn,
-            hasMoved,
-            enPassantTarget,
-            selected: null,
-            isGameOver,
-            isInfinite,
-            isPaused,
-            whiteTime,
-            blackTime,
-            increment,
-            moveHistory,
-            positionCounts,
-            halfmoveClock,
-            lastMoveHighlight
-        }
+        state: getCurrentChessState()
     });
 });
 socket.on("chess-state-sync", (data) => {
@@ -483,6 +454,32 @@ function appendChatMessage(sender, message, isSystem = false) {
     div.innerHTML = isSystem ? message : `<b>${sender}:</b> ${message}`;
     msgContainer.appendChild(div);
     msgContainer.scrollTop = msgContainer.scrollHeight;
+}
+
+
+function getCurrentChessState() {
+    return {
+        boardState,
+        currentTurn,
+        hasMoved,
+        enPassantTarget,
+        selected: null,
+        isGameOver,
+        isInfinite,
+        isPaused,
+        whiteTime,
+        blackTime,
+        increment,
+        moveHistory,
+        positionCounts,
+        halfmoveClock,
+        lastMoveHighlight
+    };
+}
+
+function syncBotGameStateForSpectators() {
+    if (!isBotGame || !currentPassword) return;
+    socket.emit("bot-game-state-sync", { password: currentPassword, state: getCurrentChessState() });
 }
 
 function sendChatMessage() {
@@ -898,20 +895,22 @@ function handleActualMove(from, to, isLocal, promotionChoice = null, options = {
         const whiteKingAlive = !!getKingPos('white', boardState);
         const blackKingAlive = !!getKingPos('black', boardState);
         if (!whiteKingAlive && !blackKingAlive) {
-            if (isLocal && !isBotGame) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
+            if (isLocal && currentPassword) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
             isGameOver = true;
             if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
             showResultModal("DRAW - BOTH KINGS EXPLODED");
             render("DRAW - BOTH KINGS EXPLODED");
+            syncBotGameStateForSpectators();
             return;
         }
         if (!whiteKingAlive || !blackKingAlive) {
             const winner = whiteKingAlive ? "WHITE" : "BLACK";
-            if (isLocal && !isBotGame) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
+            if (isLocal && currentPassword) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
             isGameOver = true;
             if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
             showResultModal(`${winner} WINS BY ATOMIC EXPLOSION`);
             render(`${winner} WINS BY ATOMIC EXPLOSION`);
+            syncBotGameStateForSpectators();
             return;
         }
     }
@@ -943,11 +942,12 @@ function handleActualMove(from, to, isLocal, promotionChoice = null, options = {
     if (team === 'white') moveHistory.push({ w: notation, b: '' });
     else if (moveHistory.length > 0) moveHistory[moveHistory.length - 1].b = notation;
     selected = null;
-    if (isLocal && !isBotGame) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
+    if (isLocal && currentPassword) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
     if (isLocal && isBotGame && !isGameOver && currentTurn === botColor) {
         setTimeout(makeBotMove, 350);
     }
     render(forcedStatus);
+    syncBotGameStateForSpectators();
     if (!isGameOver) schedulePremoveCheck();
 }
 
@@ -1395,8 +1395,14 @@ function render(forcedStatus) {
             const sq = document.createElement('div'); sq.className = `square ${(r + c) % 2 === 0 ? 'white-sq' : 'black-sq'}`;
             if (check && boardState[r][c] === (currentTurn === 'white' ? '♔' : '♚')) sq.classList.add('king-check');
             if (selected && selected.r === r && selected.c === c) sq.classList.add('selected');
+            const isLastMoveSquare = lastMoveHighlight && ((lastMoveHighlight.from.r === r && lastMoveHighlight.from.c === c) || (lastMoveHighlight.to.r === r && lastMoveHighlight.to.c === c));
             if (lastMoveHighlight && lastMoveHighlight.from.r === r && lastMoveHighlight.from.c === c) sq.classList.add('last-from');
             if (lastMoveHighlight && lastMoveHighlight.to.r === r && lastMoveHighlight.to.c === c) sq.classList.add('last-to');
+            if (isLastMoveSquare) {
+                const lastMoveOverlay = document.createElement('div');
+                lastMoveOverlay.className = `highlight last-move-highlight square-${r}${c}`;
+                sq.appendChild(lastMoveOverlay);
+            }
             const squareAnnotation = boardAnnotations.squares.find((a) => a.r === r && a.c === c);
             if (squareAnnotation) {
                 const highlight = document.createElement('div');
@@ -1440,7 +1446,10 @@ function render(forcedStatus) {
                             const team = getTeam(piece);
                             let promotionChoice = null;
                             const isPromotionMove = (piece === '♙' && team === 'white' && r === 0) || (piece === '♟' && team === 'black' && r === 7);
-                            if (isPromotionMove) promotionChoice = await choosePromotionPiece(team);
+                            if (isPromotionMove) {
+                                promotionChoice = await choosePromotionPiece(team, { r, c });
+                                if (!promotionChoice) { selected = null; render(); return; }
+                            }
                             handleOpeningPracticePlayerMove(selected, { r, c }, promotionChoice);
                         }
                     } else if (getTeam(displayBoard[r][c]) === selectableTeam) {
@@ -2062,7 +2071,10 @@ async function finishPieceDrag(e) {
     const team = getTeam(piece);
     let promotionChoice = null;
     const isPromotionMove = (piece === '♙' && team === 'white' && target.r === 0) || (piece === '♟' && team === 'black' && target.r === 7);
-    if (isPromotionMove) promotionChoice = await choosePromotionPiece(team);
+    if (isPromotionMove) {
+        promotionChoice = await choosePromotionPiece(team, target);
+        if (!promotionChoice) { selected = null; render(); return; }
+    }
     handleOpeningPracticePlayerMove(state.from, target, promotionChoice);
 }
 
@@ -2388,9 +2400,18 @@ function startBotGameFromSetup() {
     const botLabel = currentVariant === "atomic" ? `Fairy Bot (${botElo})` : `Bot (${botElo})`;
     whiteName = playAs === "white" ? "You" : botLabel;
     blackName = playAs === "black" ? "You" : botLabel;
+    currentPassword = `bot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const overlay = document.getElementById('setup-overlay');
     if (overlay) overlay.remove();
     initGameState();
+    socket.emit("register-bot-game", {
+        password: currentPassword,
+        humanColor: myColor,
+        whiteName,
+        blackName,
+        settings: gameSettings,
+        state: getCurrentChessState()
+    });
 }
 
 function joinRoom() {
@@ -2731,7 +2752,7 @@ function renderSpectateList() {
         <div style="background:#1a1a1a; padding:12px; border-radius:6px; margin-bottom:10px; display:flex; gap:10px; align-items:flex-start;">
             <div style="flex:1;">
                 <strong>${game.whiteName} vs ${game.blackName}</strong><br>
-                <small style="color:#bababa;">${variant} • ${game.settings.mins}m ${game.settings.secs}s +${game.settings.inc}</small><br>
+                <small style="color:#bababa;">${variant}${game.isBotGame ? ' • BOT GAME' : ''} • ${game.settings.mins}m ${game.settings.secs}s +${game.settings.inc}</small><br>
                 <small style="color:#9e9e9e;">Room: ${game.password}</small>
                 <div style="margin-top:8px; display:flex; gap:8px;">
                     <button class="start-btn" onclick="spectateRoom('${game.password}', false)">Spectate</button>
@@ -2796,77 +2817,60 @@ function showStatusMessage(msg) {
 }
 
 
+
 function choosePremovePromotionPiece(team, target) {
     return new Promise((resolve) => {
         clearPendingPremovePromotion();
         premovePromotionResolve = resolve;
+        chooseBoardPromotionPiece(team, target, { id: 'premove-promotion-window' }).then((piece) => {
+            premovePromotionResolve = null;
+            resolve(piece);
+        });
+    });
+}
+
+
+function chooseBoardPromotionPiece(team, target, options = {}) {
+    return new Promise((resolve) => {
+        const id = options.id || 'promotion-window';
+        const existing = document.getElementById(id);
+        if (existing) existing.remove();
+        if (id === 'promotion-window' && promotionResolve) {
+            const pendingResolve = promotionResolve;
+            promotionResolve = null;
+            pendingResolve(null);
+        }
+
         const boardEl = document.getElementById('board');
         const rect = boardEl ? boardEl.getBoundingClientRect() : { left: 0, top: 0 };
         const displayCol = boardPerspective === 'black' ? 7 - target.c : target.c;
         const panel = document.createElement('div');
-        panel.id = 'premove-promotion-window';
-        panel.className = 'premove-promotion-window';
+        panel.id = id;
+        panel.className = 'promotion-window';
         panel.style.left = `${rect.left + displayCol * 74}px`;
         panel.style.top = `${rect.top}px`;
 
         const pieces = team === 'white'
             ? ['♕', '♖', '♗', '♘']
             : ['♛', '♜', '♝', '♞'];
-        panel.innerHTML = `${pieces.map((piece) => `<button class="premove-promotion-choice" data-piece="${piece}"><span class="piece textured-piece ${getPieceTextureClass(piece)}"></span></button>`).join('')}<button class="premove-promotion-close" type="button">×</button>`;
+        panel.innerHTML = `${pieces.map((piece) => `<button class="promotion-window-choice" data-piece="${piece}"><span class="piece textured-piece ${getPieceTextureClass(piece)}"></span></button>`).join('')}<button class="promotion-window-close" type="button">×</button>`;
         document.body.appendChild(panel);
 
+        if (id === 'promotion-window') promotionResolve = resolve;
         const finish = (piece) => {
             if (panel.isConnected) panel.remove();
-            if (premovePromotionResolve) {
-                const pendingResolve = premovePromotionResolve;
-                premovePromotionResolve = null;
-                pendingResolve(piece);
-            }
+            if (id === 'promotion-window') promotionResolve = null;
+            resolve(piece);
         };
-        panel.querySelectorAll('.premove-promotion-choice').forEach((btn) => {
+        panel.querySelectorAll('.promotion-window-choice').forEach((btn) => {
             btn.addEventListener('click', () => finish(btn.getAttribute('data-piece')));
         });
-        panel.querySelector('.premove-promotion-close').addEventListener('click', () => finish(null));
+        panel.querySelector('.promotion-window-close').addEventListener('click', () => finish(null));
     });
 }
 
-function choosePromotionPiece(team) {
-    return new Promise((resolve) => {
-        const existing = document.getElementById('promotion-overlay');
-        if (existing) existing.remove();
-
-        const overlay = document.createElement('div');
-        overlay.id = 'promotion-overlay';
-        overlay.style.position = 'fixed';
-        overlay.style.inset = '0';
-        overlay.style.background = 'rgba(0,0,0,0.8)';
-        overlay.style.display = 'flex';
-        overlay.style.alignItems = 'center';
-        overlay.style.justifyContent = 'center';
-        overlay.style.zIndex = '2600';
-
-        const pieces = team === 'white'
-            ? [{ icon: '♕', name: 'Queen' }, { icon: '♖', name: 'Rook' }, { icon: '♗', name: 'Bishop' }, { icon: '♘', name: 'Knight' }]
-            : [{ icon: '♛', name: 'Queen' }, { icon: '♜', name: 'Rook' }, { icon: '♝', name: 'Bishop' }, { icon: '♞', name: 'Knight' }];
-
-        overlay.innerHTML = `
-            <div class="result-card" style="width:360px;">
-                <h2>Choose Promotion</h2>
-                <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:10px; margin-top:15px;">
-                    ${pieces.map(p => `<button class="action-btn promotion-choice" data-piece="${p.icon}" style="padding:14px; font-size:16px;">${p.icon} ${p.name}</button>`).join('')}
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(overlay);
-        overlay.querySelectorAll('.promotion-choice').forEach((btn) => {
-            btn.addEventListener('click', () => {
-                const chosen = btn.getAttribute('data-piece');
-                overlay.remove();
-                resolve(chosen);
-            });
-        });
-    });
+function choosePromotionPiece(team, target) {
+    return chooseBoardPromotionPiece(team, target, { id: 'promotion-window' });
 }
 
 function showRulesPopup() {
@@ -2967,6 +2971,7 @@ function requestRematch() {
         const overlay = document.getElementById('game-over-overlay');
         if (overlay) overlay.remove();
         initGameState();
+        syncBotGameStateForSpectators();
         return;
     }
     const btn = document.getElementById('rematch-btn');

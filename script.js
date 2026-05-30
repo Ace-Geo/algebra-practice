@@ -33,6 +33,7 @@ let openingCurrentUciLine = [];
 let pieceDragState = null;
 let suppressBoardClickUntil = 0;
 let queuedPremoves = [];
+let premovePromotionResolve = null;
 let timerLastTick = null;
 let boardAnnotations = { squares: [], arrows: [] };
 let annotationDrag = null;
@@ -1381,6 +1382,7 @@ function render(forcedStatus) {
     boardEl.oncontextmenu = (e) => e.preventDefault();
     boardEl.addEventListener('pointerup', finishAnnotationDrag);
 
+    const displayBoard = getDisplayBoard();
     const check = isTeamInCheck(currentTurn, boardState);
     let hints = [];
     if (selected && !isGameOver) {
@@ -1411,12 +1413,12 @@ function render(forcedStatus) {
                 sq.appendChild(premoveHighlight);
             }
             if (hints.some(h => h.r === r && h.c === c)) {
-                const hint = document.createElement('div'); hint.className = boardState[r][c] === '' ? 'hint-dot' : 'hint-capture';
+                const hint = document.createElement('div'); hint.className = displayBoard[r][c] === '' ? 'hint-dot' : 'hint-capture';
                 sq.appendChild(hint);
             }
-            if (boardState[r][c] !== '') {
+            if (displayBoard[r][c] !== '') {
                 const span = document.createElement('span');
-                const pieceClass = getPieceTextureClass(boardState[r][c]);
+                const pieceClass = getPieceTextureClass(displayBoard[r][c]);
                 span.className = `piece textured-piece ${pieceClass}`;
                 if (pieceDragState?.active && pieceDragState.from.r === r && pieceDragState.from.c === c) span.classList.add('drag-hidden');
                 span.addEventListener('pointerdown', (e) => handlePiecePointerDown(e, r, c));
@@ -1432,7 +1434,7 @@ function render(forcedStatus) {
                 if (selected) {
                     if (hints.some(h => h.r === r && h.c === c)) {
                         if (premoveMode) {
-                            addPremove(selected, { r, c });
+                            await addPremove(selected, { r, c });
                         } else {
                             const piece = boardState[selected.r][selected.c];
                             const team = getTeam(piece);
@@ -1441,14 +1443,14 @@ function render(forcedStatus) {
                             if (isPromotionMove) promotionChoice = await choosePromotionPiece(team);
                             handleOpeningPracticePlayerMove(selected, { r, c }, promotionChoice);
                         }
-                    } else if (getTeam(boardState[r][c]) === selectableTeam) {
+                    } else if (getTeam(displayBoard[r][c]) === selectableTeam) {
                         selected = (selected.r === r && selected.c === c) ? null : { r, c };
                         render();
                     } else {
                         selected = null;
                         render();
                     }
-                } else if (getTeam(boardState[r][c]) === selectableTeam) {
+                } else if (getTeam(displayBoard[r][c]) === selectableTeam) {
                     selected = { r, c };
                     render();
                 } else if (clearedAnnotations) {
@@ -1531,7 +1533,7 @@ function initGameState() {
         ['', '', '', '', '', '', '', ''], ['', '', '', '', '', '', '', ''],
         ['♙', '♙', '♙', '♙', '♙', '♙', '♙', '♙'], ['♖', '♘', '♗', '♕', '♔', '♗', '♘', '♖']
     ];
-    currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false; selected = null; rematchRequested = false; isPaused = false; queuedPremoves = []; timerLastTick = Date.now();
+    currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false; selected = null; rematchRequested = false; isPaused = false; clearPremoves(); timerLastTick = Date.now();
     lastMoveHighlight = null;
     halfmoveClock = 0;
     boardPerspective = isSpectator ? 'white' : myColor;
@@ -1781,28 +1783,71 @@ function isPremoveMode() {
     return !isSpectator && !isGameOver && isPlayerColor(myColor) && currentTurn !== myColor;
 }
 
-function clearPremoves() {
-    const hadPremoves = queuedPremoves.length > 0;
-    queuedPremoves = [];
-    return hadPremoves;
+function clearPendingPremovePromotion() {
+    const panel = document.getElementById('premove-promotion-window');
+    if (!panel && !premovePromotionResolve) return false;
+    if (panel) panel.remove();
+    if (premovePromotionResolve) {
+        const resolve = premovePromotionResolve;
+        premovePromotionResolve = null;
+        resolve(null);
+    }
+    return true;
 }
 
-function isPathClearForPremove(fromR, fromC, toR, toC) {
+function clearPremoves() {
+    const hadPremoves = queuedPremoves.length > 0;
+    const hadPromotionPrompt = clearPendingPremovePromotion();
+    queuedPremoves = [];
+    return hadPremoves || hadPromotionPrompt;
+}
+
+
+function getPremovePreviewBoard() {
+    const preview = boardState.map((row) => [...row]);
+    queuedPremoves.forEach((pm) => {
+        const piece = preview[pm.from.r]?.[pm.from.c];
+        if (!piece) return;
+        const isCastle = (piece === '♔' || piece === '♚') && pm.from.r === pm.to.r && Math.abs(pm.to.c - pm.from.c) === 2;
+        if (isCastle) {
+            const rookOldCol = pm.to.c > pm.from.c ? 7 : 0;
+            const rookNewCol = pm.to.c > pm.from.c ? pm.to.c - 1 : pm.to.c + 1;
+            const rook = preview[pm.from.r]?.[rookOldCol];
+            if (rook) {
+                preview[pm.from.r][rookNewCol] = rook;
+                preview[pm.from.r][rookOldCol] = '';
+            }
+        }
+        preview[pm.to.r][pm.to.c] = pm.promotion || piece;
+        preview[pm.from.r][pm.from.c] = '';
+    });
+    return preview;
+}
+
+function getDisplayBoard() {
+    return queuedPremoves.length ? getPremovePreviewBoard() : boardState;
+}
+
+function getDisplayPiece(r, c) {
+    return getDisplayBoard()[r]?.[c] || '';
+}
+
+function isPathClearForPremove(fromR, fromC, toR, toC, board = getDisplayBoard()) {
     const stepR = toR === fromR ? 0 : (toR - fromR) / Math.abs(toR - fromR);
     const stepC = toC === fromC ? 0 : (toC - fromC) / Math.abs(toC - fromC);
     let currR = fromR + stepR;
     let currC = fromC + stepC;
     while (currR !== toR || currC !== toC) {
-        if (boardState[currR][currC] !== '') return false;
+        if (board[currR][currC] !== '') return false;
         currR += stepR;
         currC += stepC;
     }
     return true;
 }
 
-function isPremoveMoveAllowed(fromR, fromC, toR, toC) {
+function isPremoveMoveAllowed(fromR, fromC, toR, toC, board = getDisplayBoard()) {
     if (fromR === toR && fromC === toC) return false;
-    const piece = boardState[fromR][fromC];
+    const piece = board[fromR]?.[fromC];
     if (!piece || getTeam(piece) !== myColor) return false;
     const dr = toR - fromR;
     const dc = toC - fromC;
@@ -1816,10 +1861,22 @@ function isPremoveMoveAllowed(fromR, fromC, toR, toC) {
         return false;
     }
     if (piece === '♘' || piece === '♞') return (adr === 2 && adc === 1) || (adr === 1 && adc === 2);
-    if (piece === '♔' || piece === '♚') return adr <= 1 && adc <= 1;
-    if (piece === '♖' || piece === '♜') return (dr === 0 || dc === 0) && isPathClearForPremove(fromR, fromC, toR, toC);
-    if (piece === '♗' || piece === '♝') return adr === adc && isPathClearForPremove(fromR, fromC, toR, toC);
-    if (piece === '♕' || piece === '♛') return (adr === adc || dr === 0 || dc === 0) && isPathClearForPremove(fromR, fromC, toR, toC);
+    if (piece === '♔' || piece === '♚') {
+        if (adr <= 1 && adc <= 1) return true;
+        if (adr === 0 && adc === 2) {
+            const homeRow = team === 'white' ? 7 : 0;
+            if (fromR !== homeRow || fromC !== 4 || !(toC === 2 || toC === 6)) return false;
+            if (hasMoved[`${fromR},${fromC}`]) return false;
+            const rookCol = toC > fromC ? 7 : 0;
+            const rook = board[fromR]?.[rookCol];
+            if (!rook || getTeam(rook) !== team || hasMoved[`${fromR},${rookCol}`]) return false;
+            return isPathClearForPremove(fromR, fromC, fromR, rookCol, board);
+        }
+        return false;
+    }
+    if (piece === '♖' || piece === '♜') return (dr === 0 || dc === 0) && isPathClearForPremove(fromR, fromC, toR, toC, board);
+    if (piece === '♗' || piece === '♝') return adr === adc && isPathClearForPremove(fromR, fromC, toR, toC, board);
+    if (piece === '♕' || piece === '♛') return (adr === adc || dr === 0 || dc === 0) && isPathClearForPremove(fromR, fromC, toR, toC, board);
     return false;
 }
 
@@ -1833,8 +1890,21 @@ function getPremoveTargets(from) {
     return targets;
 }
 
-function addPremove(from, to) {
-    queuedPremoves.push({ from: { ...from }, to: { ...to } });
+async function addPremove(from, to) {
+    const board = getDisplayBoard();
+    const piece = board[from.r]?.[from.c];
+    const team = getTeam(piece);
+    let promotion = null;
+    const isPromotionMove = (piece === '♙' && team === 'white' && to.r === 0) || (piece === '♟' && team === 'black' && to.r === 7);
+    if (isPromotionMove) {
+        promotion = await choosePremovePromotionPiece(team, to);
+        if (!promotion) {
+            selected = null;
+            render();
+            return;
+        }
+    }
+    queuedPremoves.push({ from: { ...from }, to: { ...to }, promotion });
     selected = null;
     render();
 }
@@ -1850,7 +1920,7 @@ function tryPlayNextPremove() {
     }
     queuedPremoves.shift();
     timerLastTick = Date.now();
-    handleActualMove(next.from, next.to, true, null, { skipIncrement: true, isPremove: true });
+    handleActualMove(next.from, next.to, true, next.promotion || null, { skipIncrement: true, isPremove: true });
 }
 
 function schedulePremoveCheck() {
@@ -1860,7 +1930,7 @@ function schedulePremoveCheck() {
 
 function canInteractWithBoardPiece(r, c) {
     if (isSpectator || isGameOver) return false;
-    const team = getTeam(boardState[r][c]);
+    const team = getTeam(getDisplayPiece(r, c));
     if (currentTurn === myColor) return team === currentTurn;
     if (isPremoveMode()) return team === myColor;
     return false;
@@ -1924,7 +1994,7 @@ function beginPieceDrag(e, r, c) {
     if (!canInteractWithBoardPiece(r, c)) return;
     pieceDragState = {
         from: { r, c },
-        piece: boardState[r][c],
+        piece: getDisplayPiece(r, c),
         startX: e.clientX,
         startY: e.clientY,
         active: false,
@@ -1985,7 +2055,7 @@ async function finishPieceDrag(e) {
         return;
     }
     if (premoveMode) {
-        addPremove(state.from, target);
+        await addPremove(state.from, target);
         return;
     }
     const piece = boardState[state.from.r][state.from.c];
@@ -2723,6 +2793,41 @@ function showStatusMessage(msg) {
     const area = document.getElementById('notification-area');
     area.innerHTML = `<div style="background:#4b4845; padding:10px; border-radius:4px; font-size:12px; text-align:center;">${msg}</div>`;
     setTimeout(() => { area.innerHTML = ''; }, 3000);
+}
+
+
+function choosePremovePromotionPiece(team, target) {
+    return new Promise((resolve) => {
+        clearPendingPremovePromotion();
+        premovePromotionResolve = resolve;
+        const boardEl = document.getElementById('board');
+        const rect = boardEl ? boardEl.getBoundingClientRect() : { left: 0, top: 0 };
+        const displayCol = boardPerspective === 'black' ? 7 - target.c : target.c;
+        const panel = document.createElement('div');
+        panel.id = 'premove-promotion-window';
+        panel.className = 'premove-promotion-window';
+        panel.style.left = `${rect.left + displayCol * 74}px`;
+        panel.style.top = `${rect.top}px`;
+
+        const pieces = team === 'white'
+            ? ['♕', '♖', '♗', '♘']
+            : ['♛', '♜', '♝', '♞'];
+        panel.innerHTML = `${pieces.map((piece) => `<button class="premove-promotion-choice" data-piece="${piece}"><span class="piece textured-piece ${getPieceTextureClass(piece)}"></span></button>`).join('')}<button class="premove-promotion-close" type="button">×</button>`;
+        document.body.appendChild(panel);
+
+        const finish = (piece) => {
+            if (panel.isConnected) panel.remove();
+            if (premovePromotionResolve) {
+                const pendingResolve = premovePromotionResolve;
+                premovePromotionResolve = null;
+                pendingResolve(piece);
+            }
+        };
+        panel.querySelectorAll('.premove-promotion-choice').forEach((btn) => {
+            btn.addEventListener('click', () => finish(btn.getAttribute('data-piece')));
+        });
+        panel.querySelector('.premove-promotion-close').addEventListener('click', () => finish(null));
+    });
 }
 
 function choosePromotionPiece(team) {

@@ -32,6 +32,8 @@ let openingPlayerColor = 'white';
 let openingCurrentUciLine = [];
 let pieceDragState = null;
 let suppressBoardClickUntil = 0;
+let queuedPremoves = [];
+let timerLastTick = null;
 let boardAnnotations = { squares: [], arrows: [] };
 let annotationDrag = null;
 
@@ -855,7 +857,7 @@ function isInsufficientMaterial() {
     return false;
 }
 
-function handleActualMove(from, to, isLocal, promotionChoice = null) {
+function handleActualMove(from, to, isLocal, promotionChoice = null, options = {}) {
     if (isGameOver) return;
     const movingPiece = boardState[from.r][from.c];
     const targetPiece = boardState[to.r][to.c];
@@ -887,9 +889,10 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
     const isPawnMove = movingPiece === '♙' || movingPiece === '♟';
     const isCapture = targetPiece !== '' || isEP;
     halfmoveClock = (isPawnMove || isCapture) ? 0 : (halfmoveClock + 1);
-    if (!isInfinite && isLocal) { if (team === 'white') whiteTime += increment; else blackTime += increment; }
+    if (!isInfinite && isLocal && !options.skipIncrement) { if (team === 'white') whiteTime += increment; else blackTime += increment; }
     enPassantTarget = (movingPiece === '♙' || movingPiece === '♟') && Math.abs(from.r - to.r) === 2 ? { r: (from.r + to.r) / 2, c: to.c } : null;
     currentTurn = (team === 'white' ? 'black' : 'white');
+    timerLastTick = Date.now();
     if (currentVariant === "atomic") {
         const whiteKingAlive = !!getKingPos('white', boardState);
         const blackKingAlive = !!getKingPos('black', boardState);
@@ -944,6 +947,7 @@ function handleActualMove(from, to, isLocal, promotionChoice = null) {
         setTimeout(makeBotMove, 350);
     }
     render(forcedStatus);
+    if (!isGameOver) schedulePremoveCheck();
 }
 
 function makeBotMove() {
@@ -1300,6 +1304,11 @@ function renderArrowOverlay() {
 function beginAnnotationDrag(e, sq) {
     if (e.button !== 2) return;
     e.preventDefault();
+    if (clearPremoves()) {
+        annotationDrag = null;
+        render();
+        return;
+    }
     annotationDrag = { from: { ...sq }, mode: getAnnotationMode(e) };
 }
 
@@ -1373,7 +1382,10 @@ function render(forcedStatus) {
     boardEl.addEventListener('pointerup', finishAnnotationDrag);
 
     const check = isTeamInCheck(currentTurn, boardState);
-    let hints = (selected && !isGameOver) ? getLegalMoves(currentTurn).filter(m => m.from.r === selected.r && m.from.c === selected.c).map(m => m.to) : [];
+    let hints = [];
+    if (selected && !isGameOver) {
+        hints = isPremoveMode() ? getPremoveTargets(selected) : getLegalMoves(currentTurn).filter(m => m.from.r === selected.r && m.from.c === selected.c).map(m => m.to);
+    }
     const range = (boardPerspective === 'black') ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
 
     for (let r of range) {
@@ -1392,6 +1404,12 @@ function render(forcedStatus) {
                 highlight.dataset.testType = 'highlight';
                 sq.appendChild(highlight);
             }
+            if (queuedPremoves.some((p) => (p.from.r === r && p.from.c === c) || (p.to.r === r && p.to.c === c))) {
+                const premoveHighlight = document.createElement('div');
+                premoveHighlight.className = `highlight premove-highlight square-${r}${c}`;
+                premoveHighlight.style.backgroundColor = getAnnotationSquareColor('normal');
+                sq.appendChild(premoveHighlight);
+            }
             if (hints.some(h => h.r === r && h.c === c)) {
                 const hint = document.createElement('div'); hint.className = boardState[r][c] === '' ? 'hint-dot' : 'hint-capture';
                 sq.appendChild(hint);
@@ -1408,23 +1426,29 @@ function render(forcedStatus) {
             sq.onclick = async () => {
                 if (Date.now() < suppressBoardClickUntil) return;
                 const clearedAnnotations = clearBoardAnnotations();
-                if (isSpectator || isGameOver || currentTurn !== myColor) { if (clearedAnnotations) render(); return; }
+                if (isSpectator || isGameOver || !isPlayerColor(myColor)) { if (clearedAnnotations) render(); return; }
+                const premoveMode = isPremoveMode();
+                const selectableTeam = premoveMode ? myColor : currentTurn;
                 if (selected) {
                     if (hints.some(h => h.r === r && h.c === c)) {
-                        const piece = boardState[selected.r][selected.c];
-                        const team = getTeam(piece);
-                        let promotionChoice = null;
-                        const isPromotionMove = (piece === '♙' && team === 'white' && r === 0) || (piece === '♟' && team === 'black' && r === 7);
-                        if (isPromotionMove) promotionChoice = await choosePromotionPiece(team);
-                        handleOpeningPracticePlayerMove(selected, { r, c }, promotionChoice);
-                    } else if (getTeam(boardState[r][c]) === currentTurn) {
+                        if (premoveMode) {
+                            addPremove(selected, { r, c });
+                        } else {
+                            const piece = boardState[selected.r][selected.c];
+                            const team = getTeam(piece);
+                            let promotionChoice = null;
+                            const isPromotionMove = (piece === '♙' && team === 'white' && r === 0) || (piece === '♟' && team === 'black' && r === 7);
+                            if (isPromotionMove) promotionChoice = await choosePromotionPiece(team);
+                            handleOpeningPracticePlayerMove(selected, { r, c }, promotionChoice);
+                        }
+                    } else if (getTeam(boardState[r][c]) === selectableTeam) {
                         selected = (selected.r === r && selected.c === c) ? null : { r, c };
                         render();
                     } else {
                         selected = null;
                         render();
                     }
-                } else if (getTeam(boardState[r][c]) === currentTurn) {
+                } else if (getTeam(boardState[r][c]) === selectableTeam) {
                     selected = { r, c };
                     render();
                 } else if (clearedAnnotations) {
@@ -1481,16 +1505,23 @@ function formatTime(seconds) {
 }
 
 function startTimer() {
+    if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
+    timerLastTick = Date.now();
     window.chessIntervalInstance = setInterval(() => {
-        if (isGameOver || isPaused) return;
-        if (currentTurn === 'white') whiteTime--; else blackTime--;
+        if (isGameOver) return;
+        if (isPaused) { timerLastTick = Date.now(); return; }
+        const now = Date.now();
+        const elapsed = Math.floor((now - (timerLastTick || now)) / 1000);
+        if (elapsed <= 0) return;
+        timerLastTick += elapsed * 1000;
+        if (currentTurn === 'white') whiteTime -= elapsed; else blackTime -= elapsed;
         updateTimerDisplay();
         if (whiteTime <= 0 || blackTime <= 0) {
             isGameOver = true; clearInterval(window.chessIntervalInstance);
             const msg = whiteTime <= 0 ? "BLACK WINS ON TIME" : "WHITE WINS ON TIME";
             showResultModal(msg); render(msg);
         }
-    }, 1000);
+    }, 250);
 }
 
 function initGameState() {
@@ -1500,7 +1531,7 @@ function initGameState() {
         ['', '', '', '', '', '', '', ''], ['', '', '', '', '', '', '', ''],
         ['♙', '♙', '♙', '♙', '♙', '♙', '♙', '♙'], ['♖', '♘', '♗', '♕', '♔', '♗', '♘', '♖']
     ];
-    currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false; selected = null; rematchRequested = false; isPaused = false;
+    currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false; selected = null; rematchRequested = false; isPaused = false; queuedPremoves = []; timerLastTick = Date.now();
     lastMoveHighlight = null;
     halfmoveClock = 0;
     boardPerspective = isSpectator ? 'white' : myColor;
@@ -1741,8 +1772,98 @@ function getPieceTextureClass(piece) {
 }
 
 
+
+function isPlayerColor(color) {
+    return color === 'white' || color === 'black';
+}
+
+function isPremoveMode() {
+    return !isSpectator && !isGameOver && isPlayerColor(myColor) && currentTurn !== myColor;
+}
+
+function clearPremoves() {
+    const hadPremoves = queuedPremoves.length > 0;
+    queuedPremoves = [];
+    return hadPremoves;
+}
+
+function isPathClearForPremove(fromR, fromC, toR, toC) {
+    const stepR = toR === fromR ? 0 : (toR - fromR) / Math.abs(toR - fromR);
+    const stepC = toC === fromC ? 0 : (toC - fromC) / Math.abs(toC - fromC);
+    let currR = fromR + stepR;
+    let currC = fromC + stepC;
+    while (currR !== toR || currC !== toC) {
+        if (boardState[currR][currC] !== '') return false;
+        currR += stepR;
+        currC += stepC;
+    }
+    return true;
+}
+
+function isPremoveMoveAllowed(fromR, fromC, toR, toC) {
+    if (fromR === toR && fromC === toC) return false;
+    const piece = boardState[fromR][fromC];
+    if (!piece || getTeam(piece) !== myColor) return false;
+    const dr = toR - fromR;
+    const dc = toC - fromC;
+    const adr = Math.abs(dr);
+    const adc = Math.abs(dc);
+    const team = getTeam(piece);
+    if (piece === '♙' || piece === '♟') {
+        const dir = team === 'white' ? -1 : 1;
+        if (dc === 0 && (dr === dir || (dr === 2 * dir && fromR === (team === 'white' ? 6 : 1)))) return true;
+        if (adc === 1 && dr === dir) return true;
+        return false;
+    }
+    if (piece === '♘' || piece === '♞') return (adr === 2 && adc === 1) || (adr === 1 && adc === 2);
+    if (piece === '♔' || piece === '♚') return adr <= 1 && adc <= 1;
+    if (piece === '♖' || piece === '♜') return (dr === 0 || dc === 0) && isPathClearForPremove(fromR, fromC, toR, toC);
+    if (piece === '♗' || piece === '♝') return adr === adc && isPathClearForPremove(fromR, fromC, toR, toC);
+    if (piece === '♕' || piece === '♛') return (adr === adc || dr === 0 || dc === 0) && isPathClearForPremove(fromR, fromC, toR, toC);
+    return false;
+}
+
+function getPremoveTargets(from) {
+    const targets = [];
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            if (isPremoveMoveAllowed(from.r, from.c, r, c)) targets.push({ r, c });
+        }
+    }
+    return targets;
+}
+
+function addPremove(from, to) {
+    queuedPremoves.push({ from: { ...from }, to: { ...to } });
+    selected = null;
+    render();
+}
+
+function tryPlayNextPremove() {
+    if (!queuedPremoves.length || isGameOver || currentTurn !== myColor || !isPlayerColor(myColor)) return;
+    const next = queuedPremoves[0];
+    const piece = boardState[next.from.r]?.[next.from.c];
+    if (!piece || getTeam(piece) !== myColor || !isMoveLegal(next.from.r, next.from.c, next.to.r, next.to.c, myColor)) {
+        clearPremoves();
+        render();
+        return;
+    }
+    queuedPremoves.shift();
+    timerLastTick = Date.now();
+    handleActualMove(next.from, next.to, true, null, { skipIncrement: true, isPremove: true });
+}
+
+function schedulePremoveCheck() {
+    if (!queuedPremoves.length) return;
+    setTimeout(tryPlayNextPremove, 0);
+}
+
 function canInteractWithBoardPiece(r, c) {
-    return !isSpectator && !isGameOver && currentTurn === myColor && getTeam(boardState[r][c]) === currentTurn;
+    if (isSpectator || isGameOver) return false;
+    const team = getTeam(boardState[r][c]);
+    if (currentTurn === myColor) return team === currentTurn;
+    if (isPremoveMode()) return team === myColor;
+    return false;
 }
 
 function getBoardSquareFromClientPoint(clientX, clientY) {
@@ -1854,10 +1975,17 @@ async function finishPieceDrag(e) {
         render();
         return;
     }
-    const legal = getLegalMoves(currentTurn).some((m) => m.from.r === state.from.r && m.from.c === state.from.c && m.to.r === target.r && m.to.c === target.c);
+    const premoveMode = isPremoveMode();
+    const legal = premoveMode
+        ? isPremoveMoveAllowed(state.from.r, state.from.c, target.r, target.c)
+        : getLegalMoves(currentTurn).some((m) => m.from.r === state.from.r && m.from.c === state.from.c && m.to.r === target.r && m.to.c === target.c);
     if (!legal) {
         selected = null;
         render();
+        return;
+    }
+    if (premoveMode) {
+        addPremove(state.from, target);
         return;
     }
     const piece = boardState[state.from.r][state.from.c];

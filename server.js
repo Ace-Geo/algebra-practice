@@ -142,13 +142,92 @@ function getNextSpectatorId(room) {
 function buildSpectatorList(room) {
     return Object.values(room.spectators)
         .sort((a, b) => a.id - b.id)
-        .map((s) => ({ id: s.id, name: s.name, isAdmin: s.isAdmin }));
+        .map((s) => {
+            const mute = getMuteState(room, { type: "spectator", id: s.id });
+            return { id: s.id, name: s.name, isAdmin: s.isAdmin, muted: mute.muted, fullMuted: mute.fullMuted };
+        });
 }
 
 function emitSpectatorList(roomPass) {
     const room = rooms[roomPass];
     if (!room) return;
     io.in(roomPass).emit("spectator-list-updated", { spectators: buildSpectatorList(room) });
+}
+
+
+function ensureRoomMutes(room) {
+    if (!room.mutes) room.mutes = { white: { muted: false, fullMuted: false }, black: { muted: false, fullMuted: false }, spectators: {} };
+    if (!room.mutes.white) room.mutes.white = { muted: false, fullMuted: false };
+    if (!room.mutes.black) room.mutes.black = { muted: false, fullMuted: false };
+    if (!room.mutes.spectators) room.mutes.spectators = {};
+    return room.mutes;
+}
+
+function getParticipantKey(room, socketId) {
+    if (room.players.white === socketId) return { type: "player", color: "white", key: "white" };
+    if (room.players.black === socketId) return { type: "player", color: "black", key: "black" };
+    const spectator = room.spectators[socketId];
+    if (spectator) return { type: "spectator", id: spectator.id, key: `spectator:${spectator.id}` };
+    return null;
+}
+
+function getMuteState(room, participant) {
+    const mutes = ensureRoomMutes(room);
+    if (!participant) return { muted: false, fullMuted: false };
+    if (participant.type === "player") return mutes[participant.color] || { muted: false, fullMuted: false };
+    return mutes.spectators[participant.id] || { muted: false, fullMuted: false };
+}
+
+function setMuteState(room, target, mode, value) {
+    const mutes = ensureRoomMutes(room);
+    const state = target.type === "player"
+        ? mutes[target.color]
+        : (mutes.spectators[target.id] ||= { muted: false, fullMuted: false });
+    if (mode === "fullmute") state.fullMuted = value;
+    else state.muted = value;
+    return state;
+}
+
+function resolveMuteTarget(room, data) {
+    if (data.targetType === "player" && (data.targetColor === "white" || data.targetColor === "black")) {
+        return { type: "player", color: data.targetColor, socketId: room.players[data.targetColor], label: data.targetColor.toUpperCase() };
+    }
+    if (data.targetType === "spectator") {
+        const spectatorEntry = Object.entries(room.spectators).find(([, s]) => s.id === data.spectatorId);
+        if (!spectatorEntry) return null;
+        return { type: "spectator", id: data.spectatorId, socketId: spectatorEntry[0], label: `Spectator ${data.spectatorId}` };
+    }
+    return null;
+}
+
+function isSocketAdmin(room, socketId) {
+    if (room.players.white === socketId) return !!room.players.whiteAdmin;
+    if (room.players.black === socketId) return !!room.players.blackAdmin;
+    return !!room.spectators[socketId]?.isAdmin;
+}
+
+function isSocketFullMuted(room, socketId) {
+    return !!getMuteState(room, getParticipantKey(room, socketId)).fullMuted;
+}
+
+function canRunAdminCommand(socket, password) {
+    const room = rooms[password];
+    if (!room) return null;
+    if (!isSocketAdmin(room, socket.id)) {
+        socket.emit("admin-command-denied", { message: "Command denied: you are not an admin." });
+        return null;
+    }
+    if (isSocketFullMuted(room, socket.id)) {
+        socket.emit("admin-command-denied", { message: "Command denied: you are full-muted." });
+        return null;
+    }
+    return room;
+}
+
+function sendMuteState(room, socketId) {
+    const participant = getParticipantKey(room, socketId);
+    const state = getMuteState(room, participant);
+    io.to(socketId).emit("mute-state", state);
 }
 
 function buildActiveGames() {
@@ -179,6 +258,7 @@ io.on("connection", (socket) => {
             status: "waiting",
             players: { white: null, black: null, whiteName: null, blackName: null, whiteAdmin: false, blackAdmin: false },
             spectators: {},
+            mutes: { white: { muted: false, fullMuted: false }, black: { muted: false, fullMuted: false }, spectators: {} },
             reconnectDeadline: null
         };
         socket.emit("room-created", { password });
@@ -202,6 +282,7 @@ io.on("connection", (socket) => {
                 blackAdmin: false
             },
             spectators: {},
+            mutes: { white: { muted: false, fullMuted: false }, black: { muted: false, fullMuted: false }, spectators: {} },
             reconnectDeadline: null,
             isBotGame: true,
             botOwnerId: socket.id,
@@ -264,6 +345,8 @@ io.on("connection", (socket) => {
             settings: room.settings,
             oppName: room.creatorName
         });
+        sendMuteState(room, creatorId);
+        sendMuteState(room, joinerId);
     });
 
     socket.on("rejoin-room", (data) => {
@@ -290,6 +373,7 @@ io.on("connection", (socket) => {
 
         const oppName = color === "white" ? room.players.blackName : room.players.whiteName;
         socket.emit("player-assignment", { color, settings: room.settings, oppName });
+        sendMuteState(room, socket.id);
         socket.to(password).emit("opponent-reconnected", { message: `${name} reconnected.` });
 
         const requesterId = socket.id;
@@ -643,6 +727,7 @@ io.on("connection", (socket) => {
             blackName: room.players.blackName
         });
 
+        sendMuteState(room, socket.id);
         if (room.lastSpectatorState) {
             socket.emit("spectator-state-sync", { state: room.lastSpectatorState });
         }
@@ -670,7 +755,7 @@ io.on("connection", (socket) => {
 
     socket.on("self-admin-enabled", (data) => {
         const room = rooms[data.password];
-        if (!room) return;
+        if (!room || isSocketFullMuted(room, socket.id)) return;
 
         if (room.players.white === socket.id) {
             room.players.whiteAdmin = true;
@@ -689,12 +774,14 @@ io.on("connection", (socket) => {
     });
 
     socket.on("request-admin-list", (data) => {
-        const room = rooms[data.password];
+        const room = canRunAdminCommand(socket, data.password);
         if (!room) return;
 
+        const whiteMute = getMuteState(room, { type: "player", color: "white" });
+        const blackMute = getMuteState(room, { type: "player", color: "black" });
         socket.emit("admin-list", {
-            white: { name: room.players.whiteName || "White", isAdmin: !!room.players.whiteAdmin },
-            black: { name: room.players.blackName || "Black", isAdmin: !!room.players.blackAdmin },
+            white: { name: room.players.whiteName || "White", isAdmin: !!room.players.whiteAdmin, muted: whiteMute.muted, fullMuted: whiteMute.fullMuted },
+            black: { name: room.players.blackName || "Black", isAdmin: !!room.players.blackAdmin, muted: blackMute.muted, fullMuted: blackMute.fullMuted },
             spectators: buildSpectatorList(room)
         });
     });
@@ -710,6 +797,13 @@ io.on("connection", (socket) => {
     });
 
     socket.on("send-chat", (data) => {
+        const room = rooms[data.password];
+        if (!room) return;
+        const mute = getMuteState(room, getParticipantKey(room, socket.id));
+        if (mute.muted || mute.fullMuted) {
+            socket.emit("chat-denied", { message: "Message blocked: you are muted." });
+            return;
+        }
         socket.to(data.password).emit("receive-chat", {
             message: data.message,
             sender: data.senderName
@@ -718,10 +812,14 @@ io.on("connection", (socket) => {
 
     // --- ADMIN COMMANDS ---
     socket.on("admin-pause-toggle", (data) => {
+        const room = canRunAdminCommand(socket, data.password);
+        if (!room) return;
         io.in(data.password).emit("pause-state-updated", { isPaused: data.isPaused });
     });
 
     socket.on("admin-set-time", (data) => {
+        const room = canRunAdminCommand(socket, data.password);
+        if (!room) return;
         io.in(data.password).emit("time-updated", {
             color: data.color,
             newTime: data.newTime
@@ -729,12 +827,16 @@ io.on("connection", (socket) => {
     });
 
     socket.on("admin-set-increment", (data) => {
+        const room = canRunAdminCommand(socket, data.password);
+        if (!room) return;
         io.in(data.password).emit("increment-updated", {
             newInc: data.newInc
         });
     });
 
     socket.on("admin-place-piece", (data) => {
+        const room = canRunAdminCommand(socket, data.password);
+        if (!room) return;
         io.in(data.password).emit("piece-placed", {
             r: data.r,
             c: data.c,
@@ -743,11 +845,28 @@ io.on("connection", (socket) => {
     });
 
     socket.on("admin-reset-board", (data) => {
+        const room = canRunAdminCommand(socket, data.password);
+        if (!room) return;
         io.in(data.password).emit("board-reset-triggered");
     });
 
+    socket.on("admin-mute-toggle", (data) => {
+        const room = canRunAdminCommand(socket, data.password);
+        if (!room) return;
+        if (data.mode !== "mute" && data.mode !== "fullmute") return;
+        const target = resolveMuteTarget(room, data);
+        if (!target) return;
+        const state = setMuteState(room, target, data.mode, !!data.value);
+        const message = `${target.label} ${data.mode === "fullmute" ? "full mute" : "mute"} set to ${!!data.value}.`;
+        if (target.socketId && !String(target.socketId).startsWith("bot:")) {
+            io.to(target.socketId).emit("mute-updated", { ...state, appliesToMe: true, message });
+        }
+        socket.emit("mute-updated", { ...getMuteState(room, getParticipantKey(room, socket.id)), appliesToMe: false, message });
+        emitSpectatorList(data.password);
+    });
+
     socket.on("admin-permission-toggle", (data) => {
-        const room = rooms[data.password];
+        const room = canRunAdminCommand(socket, data.password);
         if (!room) return;
 
         if (data.targetType === "spectator") {
@@ -807,7 +926,9 @@ io.on("connection", (socket) => {
     socket.on("disconnecting", () => {
         Object.entries(rooms).forEach(([roomPass, room]) => {
             if (room.spectators[socket.id]) {
+                const spectatorId = room.spectators[socket.id].id;
                 delete room.spectators[socket.id];
+                if (room.mutes?.spectators) delete room.mutes.spectators[spectatorId];
                 emitSpectatorList(roomPass);
                 return;
             }

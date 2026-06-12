@@ -57,6 +57,10 @@ let whiteTime;
 let blackTime;
 let increment;
 let moveHistory = [];
+let boardSnapshots = [];
+let boardSnapshotHighlights = [];
+let notationViewPly = null;
+let atomicExplosionHighlight = null;
 let rematchRequested = false;
 let gameSettings = null;
 let currentVariant = "standard";
@@ -77,6 +81,8 @@ let isOpponentAdmin = false;
 let keyBuffer = "";
 let isPaused = false;
 let playerAdmins = { white: false, black: false };
+let isChatMuted = false;
+let isFullMuted = false;
 
 // --- SOCKET LISTENERS ---
 socket.on("player-assignment", (data) => {
@@ -179,14 +185,35 @@ socket.on("spectator-list-updated", (data) => {
 });
 
 socket.on("admin-list", (data) => {
-    let list = `Player List:<br>White (${data.white.name}): Admin=${data.white.isAdmin}<br>Black (${data.black.name}): Admin=${data.black.isAdmin}`;
+    let list = `Player List:<br>White (${data.white.name}): Admin=${data.white.isAdmin}, Muted=${!!data.white.muted}, FullMuted=${!!data.white.fullMuted}<br>Black (${data.black.name}): Admin=${data.black.isAdmin}, Muted=${!!data.black.muted}, FullMuted=${!!data.black.fullMuted}`;
     (data.spectators || [])
         .slice()
         .sort((a, b) => a.id - b.id)
         .forEach((spec) => {
-            list += `<br>Spectator ${spec.id} (${spec.name}): Admin=${spec.isAdmin}`;
+            list += `<br>Spectator ${spec.id} (${spec.name}): Admin=${spec.isAdmin}, Muted=${!!spec.muted}, FullMuted=${!!spec.fullMuted}`;
         });
     appendChatMessage("Console", list, true);
+});
+
+socket.on("mute-state", (data) => {
+    isChatMuted = !!data.muted;
+    isFullMuted = !!data.fullMuted;
+});
+
+socket.on("mute-updated", (data) => {
+    if (data.appliesToMe) {
+        isChatMuted = !!data.muted;
+        isFullMuted = !!data.fullMuted;
+    }
+    appendChatMessage("Console", data.message, true);
+});
+
+socket.on("chat-denied", (data) => {
+    appendChatMessage("Console", data?.message || "Message blocked.", true);
+});
+
+socket.on("admin-command-denied", (data) => {
+    appendChatMessage("Console", data?.message || "Command denied.", true);
 });
 
 socket.on("spectator-sync-needed", (data) => {
@@ -215,6 +242,10 @@ socket.on("spectator-state-sync", (data) => {
     positionCounts = data.state.positionCounts || {};
     halfmoveClock = data.state.halfmoveClock || 0;
     lastMoveHighlight = data.state.lastMoveHighlight || null;
+    boardSnapshots = Array.isArray(data.state.boardSnapshots) && data.state.boardSnapshots.length ? data.state.boardSnapshots.map((board) => cloneBoard(board)) : [cloneBoard(boardState)];
+    boardSnapshotHighlights = Array.isArray(data.state.boardSnapshotHighlights) ? data.state.boardSnapshotHighlights : boardSnapshots.map((_, i) => i === boardSnapshots.length - 1 ? lastMoveHighlight : null);
+    notationViewPly = null;
+    atomicExplosionHighlight = data.state.atomicExplosionHighlight || null;
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     if (!isInfinite) startTimer();
     render();
@@ -251,6 +282,8 @@ socket.on("piece-placed", (data) => {
     boardState[data.r][data.c] = data.piece;
     resetPositionTracking();
     halfmoveClock = 0;
+    atomicExplosionHighlight = null;
+    resetBoardSnapshots();
     appendChatMessage("Console", "Board modified by Admin", true);
     render();
     if (isBotGame && !isGameOver && currentTurn === botColor) {
@@ -274,6 +307,8 @@ socket.on("board-reset-triggered", () => {
     hasMoved = {};
     resetPositionTracking();
     halfmoveClock = 0;
+    atomicExplosionHighlight = null;
+    resetBoardSnapshots();
     appendChatMessage("Console", "Board reset to starting position by Admin", true);
     render();
     if (isBotGame && !isGameOver && currentTurn === botColor) {
@@ -398,6 +433,10 @@ socket.on("chess-state-sync", (data) => {
     positionCounts = data.state.positionCounts || {};
     halfmoveClock = data.state.halfmoveClock || 0;
     lastMoveHighlight = data.state.lastMoveHighlight || null;
+    boardSnapshots = Array.isArray(data.state.boardSnapshots) && data.state.boardSnapshots.length ? data.state.boardSnapshots.map((board) => cloneBoard(board)) : [cloneBoard(boardState)];
+    boardSnapshotHighlights = Array.isArray(data.state.boardSnapshotHighlights) ? data.state.boardSnapshotHighlights : boardSnapshots.map((_, i) => i === boardSnapshots.length - 1 ? lastMoveHighlight : null);
+    notationViewPly = null;
+    atomicExplosionHighlight = data.state.atomicExplosionHighlight || null;
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     if (!isInfinite && !isGameOver && !isPaused) startTimer();
     render();
@@ -473,7 +512,10 @@ function getCurrentChessState() {
         moveHistory,
         positionCounts,
         halfmoveClock,
-        lastMoveHighlight
+        lastMoveHighlight,
+        boardSnapshots: boardSnapshots.map((board) => cloneBoard(board)),
+        boardSnapshotHighlights: boardSnapshotHighlights.map((h) => h ? { from: { ...h.from }, to: { ...h.to } } : null),
+        atomicExplosionHighlight
     };
 }
 
@@ -482,13 +524,63 @@ function syncBotGameStateForSpectators() {
     socket.emit("bot-game-state-sync", { password: currentPassword, state: getCurrentChessState() });
 }
 
+
+function cloneBoard(board = boardState) {
+    return board.map((row) => [...row]);
+}
+
+function resetBoardSnapshots() {
+    boardSnapshots = boardState ? [cloneBoard(boardState)] : [];
+    boardSnapshotHighlights = [null];
+    notationViewPly = null;
+}
+
+function recordBoardSnapshot() {
+    if (!boardState) return;
+    boardSnapshots.push(cloneBoard(boardState));
+    boardSnapshotHighlights.push(lastMoveHighlight ? { from: { ...lastMoveHighlight.from }, to: { ...lastMoveHighlight.to } } : null);
+}
+
+function setNotationView(ply) {
+    const idx = Number(ply);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= boardSnapshots.length) return;
+    notationViewPly = idx;
+    selected = null;
+    render();
+}
+
+function returnToLiveNotationView() {
+    if (notationViewPly === null) return false;
+    notationViewPly = null;
+    selected = null;
+    render();
+    return true;
+}
+
+function isViewingHistoricalPosition() {
+    return notationViewPly !== null;
+}
+
 function sendChatMessage() {
     const input = document.getElementById('chat-input');
     const msg = input.value.trim();
     if (!msg || !currentPassword) return;
 
-    if (msg.startsWith("/") && isAdmin) {
-        handleAdminCommand(msg);
+    if (msg.startsWith("/")) {
+        if (isFullMuted) {
+            appendChatMessage("Console", "You are full-muted and cannot run commands.", true);
+            input.value = '';
+            return;
+        }
+        if (isAdmin) {
+            handleAdminCommand(msg);
+            input.value = '';
+            return;
+        }
+    }
+
+    if (isChatMuted || isFullMuted) {
+        appendChatMessage("Console", "You are muted and cannot send chat messages.", true);
         input.value = '';
         return;
     }
@@ -529,6 +621,16 @@ const COMMANDS_HELP = {
         desc: "Lists admin status or toggles permissions for a color or spectator id.",
         usage: "/admin <list or color or spectator-id> <true/false (if not list)>",
         args: "Use /admin list to view permissions, /admin white true or /admin black false for players, or /admin <spectator-id> true/false for spectators."
+    },
+    "mute": {
+        desc: "Mutes or unmutes chat for a player color or spectator id.",
+        usage: "/mute <white/black/spectator-id> <true/false>",
+        args: "Muted users cannot send chat, but can still run admin commands if they are admins."
+    },
+    "fullmute": {
+        desc: "Fully mutes or unmutes chat and commands for a player color or spectator id.",
+        usage: "/fullmute <white/black/spectator-id> <true/false>",
+        args: "Full-muted users cannot send chat or run commands, including unmuting themselves."
     },
     "help": {
         desc: "Lists all commands or shows usage for one.",
@@ -572,6 +674,26 @@ function handleAdminCommand(cmd) {
             });
         } else {
             appendChatMessage("Console", `Usage: ${COMMANDS_HELP.admin.usage}`, true);
+        }
+    }
+    else if (baseCmd === "mute" || baseCmd === "fullmute") {
+        const target = args[1]?.toLowerCase();
+        const value = args[2]?.toLowerCase();
+        if (!target || (value !== 'true' && value !== 'false')) {
+            appendChatMessage("Console", `Usage: ${COMMANDS_HELP[baseCmd].usage}`, true);
+            return;
+        }
+        const payload = {
+            password: currentPassword,
+            mode: baseCmd,
+            value: value === 'true'
+        };
+        if (target === 'white' || target === 'black') {
+            socket.emit("admin-mute-toggle", { ...payload, targetType: "player", targetColor: target });
+        } else if (!Number.isNaN(parseInt(target))) {
+            socket.emit("admin-mute-toggle", { ...payload, targetType: "spectator", spectatorId: parseInt(target) });
+        } else {
+            appendChatMessage("Console", `Usage: ${COMMANDS_HELP[baseCmd].usage}`, true);
         }
     }
     else if (baseCmd === "pause") {
@@ -872,8 +994,9 @@ function handleActualMove(from, to, isLocal, promotionChoice = null, options = {
     hasMoved[`${from.r},${from.c}`] = true;
     lastMoveHighlight = { from: { r: from.r, c: from.c }, to: { r: to.r, c: to.c } };
     boardState[to.r][to.c] = movingPiece; boardState[from.r][from.c] = '';
+    atomicExplosionHighlight = null;
     if (currentVariant === "atomic" && (targetPiece !== '' || isEP)) {
-        applyAtomicExplosion(boardState, to.r, to.c);
+        atomicExplosionHighlight = applyAtomicExplosion(boardState, to.r, to.c);
     }
     let promotedTo = null;
     if (movingPiece === '♙' && to.r === 0) {
@@ -941,6 +1064,8 @@ function handleActualMove(from, to, isLocal, promotionChoice = null, options = {
     } else if (inCheck) notation += '+';
     if (team === 'white') moveHistory.push({ w: notation, b: '' });
     else if (moveHistory.length > 0) moveHistory[moveHistory.length - 1].b = notation;
+    recordBoardSnapshot();
+    if (notationViewPly === boardSnapshots.length - 2) notationViewPly = null;
     selected = null;
     if (isLocal && currentPassword) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
     if (isLocal && isBotGame && !isGameOver && currentTurn === botColor) {
@@ -1383,9 +1508,10 @@ function render(forcedStatus) {
     boardEl.addEventListener('pointerup', finishAnnotationDrag);
 
     const displayBoard = getDisplayBoard();
-    const check = isTeamInCheck(currentTurn, boardState);
+    const visibleLastMoveHighlight = isViewingHistoricalPosition() ? boardSnapshotHighlights[notationViewPly] : lastMoveHighlight;
+    const check = !isViewingHistoricalPosition() && isTeamInCheck(currentTurn, boardState);
     let hints = [];
-    if (selected && !isGameOver) {
+    if (selected && !isGameOver && !isViewingHistoricalPosition()) {
         hints = isPremoveMode() ? getPremoveTargets(selected) : getLegalMoves(currentTurn).filter(m => m.from.r === selected.r && m.from.c === selected.c).map(m => m.to);
     }
     const range = (boardPerspective === 'black') ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
@@ -1395,13 +1521,18 @@ function render(forcedStatus) {
             const sq = document.createElement('div'); sq.className = `square ${(r + c) % 2 === 0 ? 'white-sq' : 'black-sq'}`;
             if (check && boardState[r][c] === (currentTurn === 'white' ? '♔' : '♚')) sq.classList.add('king-check');
             if (selected && selected.r === r && selected.c === c) sq.classList.add('selected');
-            const isLastMoveSquare = lastMoveHighlight && ((lastMoveHighlight.from.r === r && lastMoveHighlight.from.c === c) || (lastMoveHighlight.to.r === r && lastMoveHighlight.to.c === c));
-            if (lastMoveHighlight && lastMoveHighlight.from.r === r && lastMoveHighlight.from.c === c) sq.classList.add('last-from');
-            if (lastMoveHighlight && lastMoveHighlight.to.r === r && lastMoveHighlight.to.c === c) sq.classList.add('last-to');
+            const isLastMoveSquare = visibleLastMoveHighlight && ((visibleLastMoveHighlight.from.r === r && visibleLastMoveHighlight.from.c === c) || (visibleLastMoveHighlight.to.r === r && visibleLastMoveHighlight.to.c === c));
+            if (visibleLastMoveHighlight && visibleLastMoveHighlight.from.r === r && visibleLastMoveHighlight.from.c === c) sq.classList.add('last-from');
+            if (visibleLastMoveHighlight && visibleLastMoveHighlight.to.r === r && visibleLastMoveHighlight.to.c === c) sq.classList.add('last-to');
             if (isLastMoveSquare) {
                 const lastMoveOverlay = document.createElement('div');
                 lastMoveOverlay.className = `highlight last-move-highlight square-${r}${c}`;
                 sq.appendChild(lastMoveOverlay);
+            }
+            if (!isViewingHistoricalPosition() && atomicExplosionHighlight?.some((x) => x.r === r && x.c === c)) {
+                const explosionOverlay = document.createElement('div');
+                explosionOverlay.className = `highlight atomic-explosion-highlight square-${r}${c}`;
+                sq.appendChild(explosionOverlay);
             }
             const squareAnnotation = boardAnnotations.squares.find((a) => a.r === r && a.c === c);
             if (squareAnnotation) {
@@ -1433,6 +1564,7 @@ function render(forcedStatus) {
             sq.addEventListener('pointerdown', (e) => beginAnnotationDrag(e, { r, c }));
             sq.onclick = async () => {
                 if (Date.now() < suppressBoardClickUntil) return;
+                if (isViewingHistoricalPosition()) { returnToLiveNotationView(); return; }
                 const clearedAnnotations = clearBoardAnnotations();
                 if (isSpectator || isGameOver || !isPlayerColor(myColor)) { if (clearedAnnotations) render(); return; }
                 const premoveMode = isPremoveMode();
@@ -1493,9 +1625,16 @@ function render(forcedStatus) {
         <div id="history-container"></div>
     `;
     const hist = sidePanel.querySelector('#history-container');
+    const liveBtn = document.createElement('button');
+    liveBtn.className = `notation-live-btn ${notationViewPly === null ? 'active' : ''}`;
+    liveBtn.textContent = notationViewPly === null ? 'Live position' : 'Return to live position';
+    liveBtn.onclick = returnToLiveNotationView;
+    hist.appendChild(liveBtn);
     moveHistory.forEach((m, i) => {
         const row = document.createElement('div'); row.className = 'history-row';
-        row.innerHTML = `<div class="move-num">${i + 1}.</div><div>${m.w}</div><div>${m.b}</div>`;
+        const whitePly = (i * 2) + 1;
+        const blackPly = (i * 2) + 2;
+        row.innerHTML = `<div class="move-num">${i + 1}.</div><button class="notation-move ${notationViewPly === whitePly ? 'active' : ''}" ${m.w ? `onclick="setNotationView(${whitePly})"` : 'disabled'}>${m.w || ''}</button><button class="notation-move ${notationViewPly === blackPly ? 'active' : ''}" ${m.b ? `onclick="setNotationView(${blackPly})"` : 'disabled'}>${m.b || ''}</button>`;
         hist.appendChild(row);
     });
     layout.appendChild(sidePanel);
@@ -1544,6 +1683,7 @@ function initGameState() {
     ];
     currentTurn = 'white'; hasMoved = {}; moveHistory = []; isGameOver = false; selected = null; rematchRequested = false; isPaused = false; clearPremoves(); timerLastTick = Date.now();
     lastMoveHighlight = null;
+    atomicExplosionHighlight = null;
     halfmoveClock = 0;
     boardPerspective = isSpectator ? 'white' : myColor;
     if (gameSettings) {
@@ -1552,6 +1692,7 @@ function initGameState() {
         isInfinite = (whiteTime === 0);
     }
     resetPositionTracking();
+    resetBoardSnapshots();
     if (window.chessIntervalInstance) clearInterval(window.chessIntervalInstance);
     if (!isInfinite) startTimer();
     render();
@@ -1772,6 +1913,7 @@ function applyAtomicExplosion(board, r, c) {
         }
     }
     splash.forEach(([rr, cc]) => { board[rr][cc] = ''; });
+    return splash.map(([rr, cc]) => ({ r: rr, c: cc }));
 }
 
 function getPieceTextureClass(piece) {
@@ -1834,6 +1976,7 @@ function getPremovePreviewBoard() {
 }
 
 function getDisplayBoard() {
+    if (isViewingHistoricalPosition() && boardSnapshots[notationViewPly]) return boardSnapshots[notationViewPly];
     return queuedPremoves.length ? getPremovePreviewBoard() : boardState;
 }
 
@@ -1938,7 +2081,7 @@ function schedulePremoveCheck() {
 }
 
 function canInteractWithBoardPiece(r, c) {
-    if (isSpectator || isGameOver) return false;
+    if (isViewingHistoricalPosition() || isSpectator || isGameOver) return false;
     const team = getTeam(getDisplayPiece(r, c));
     if (currentTurn === myColor) return team === currentTurn;
     if (isPremoveMode()) return team === myColor;
@@ -2236,6 +2379,10 @@ function compileOpeningLineToUci(line) {
         halfmoveClock,
         positionCounts: { ...positionCounts },
         moveHistory: moveHistory.map((m) => ({ ...m })),
+        boardSnapshots: boardSnapshots.map((board) => cloneBoard(board)),
+        boardSnapshotHighlights: boardSnapshotHighlights.map((h) => h ? { from: { ...h.from }, to: { ...h.to } } : null),
+        notationViewPly,
+        atomicExplosionHighlight,
         isGameOver
     };
 
@@ -2256,6 +2403,10 @@ function compileOpeningLineToUci(line) {
     halfmoveClock = saved.halfmoveClock;
     positionCounts = saved.positionCounts;
     moveHistory = saved.moveHistory;
+    boardSnapshots = saved.boardSnapshots;
+    boardSnapshotHighlights = saved.boardSnapshotHighlights;
+    notationViewPly = saved.notationViewPly;
+    atomicExplosionHighlight = saved.atomicExplosionHighlight;
     isGameOver = saved.isGameOver;
     selected = null;
 

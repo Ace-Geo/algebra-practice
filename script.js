@@ -60,6 +60,7 @@ let moveHistory = [];
 let boardSnapshots = [];
 let boardSnapshotHighlights = [];
 let notationViewPly = null;
+let notationPlaybackTimer = null;
 let atomicExplosionHighlight = null;
 let rematchRequested = false;
 let gameSettings = null;
@@ -533,6 +534,7 @@ function resetBoardSnapshots() {
     boardSnapshots = boardState ? [cloneBoard(boardState)] : [];
     boardSnapshotHighlights = [null];
     notationViewPly = null;
+    stopNotationPlayback();
 }
 
 function recordBoardSnapshot() {
@@ -541,10 +543,27 @@ function recordBoardSnapshot() {
     boardSnapshotHighlights.push(lastMoveHighlight ? { from: { ...lastMoveHighlight.from }, to: { ...lastMoveHighlight.to } } : null);
 }
 
+function getLatestPly() {
+    return Math.max(0, boardSnapshots.length - 1);
+}
+
+function getViewedPly() {
+    return notationViewPly === null ? getLatestPly() : notationViewPly;
+}
+
+function stopNotationPlayback() {
+    if (notationPlaybackTimer) {
+        clearInterval(notationPlaybackTimer);
+        notationPlaybackTimer = null;
+        return true;
+    }
+    return false;
+}
+
 function setNotationView(ply) {
     const idx = Number(ply);
     if (!Number.isInteger(idx) || idx < 0 || idx >= boardSnapshots.length) return;
-    notationViewPly = idx;
+    notationViewPly = idx === getLatestPly() ? null : idx;
     selected = null;
     render();
 }
@@ -559,6 +578,40 @@ function returnToLiveNotationView() {
 
 function isViewingHistoricalPosition() {
     return notationViewPly !== null;
+}
+
+function jumpNotationToStart() {
+    stopNotationPlayback();
+    setNotationView(0);
+}
+
+function stepNotation(delta) {
+    const latest = getLatestPly();
+    const next = Math.max(0, Math.min(latest, getViewedPly() + delta));
+    if (next === getViewedPly()) return;
+    setNotationView(next);
+}
+
+function jumpNotationToLatest() {
+    stopNotationPlayback();
+    setNotationView(getLatestPly());
+}
+
+function toggleNotationPlayback() {
+    if (stopNotationPlayback()) {
+        render();
+        return;
+    }
+    if (getViewedPly() >= getLatestPly()) setNotationView(0);
+    notationPlaybackTimer = setInterval(() => {
+        if (getViewedPly() >= getLatestPly()) {
+            stopNotationPlayback();
+            setNotationView(getLatestPly());
+            return;
+        }
+        stepNotation(1);
+    }, 900);
+    render();
 }
 
 function sendChatMessage() {
@@ -762,6 +815,12 @@ function handleAdminCommand(cmd) {
 
 window.addEventListener('keydown', (e) => {
     if (document.activeElement.tagName === 'INPUT') return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        stopNotationPlayback();
+        stepNotation(e.key === 'ArrowLeft' ? -1 : 1);
+        return;
+    }
     keyBuffer += e.key;
     if (keyBuffer.length > 2) keyBuffer = keyBuffer.slice(-2);
     if (keyBuffer === "[]") {
@@ -1564,7 +1623,7 @@ function render(forcedStatus) {
             sq.addEventListener('pointerdown', (e) => beginAnnotationDrag(e, { r, c }));
             sq.onclick = async () => {
                 if (Date.now() < suppressBoardClickUntil) return;
-                if (isViewingHistoricalPosition()) { returnToLiveNotationView(); return; }
+                if (isViewingHistoricalPosition()) return;
                 const clearedAnnotations = clearBoardAnnotations();
                 if (isSpectator || isGameOver || !isPlayerColor(myColor)) { if (clearedAnnotations) render(); return; }
                 const premoveMode = isPremoveMode();
@@ -1625,16 +1684,23 @@ function render(forcedStatus) {
         <div id="history-container"></div>
     `;
     const hist = sidePanel.querySelector('#history-container');
-    const liveBtn = document.createElement('button');
-    liveBtn.className = `notation-live-btn ${notationViewPly === null ? 'active' : ''}`;
-    liveBtn.textContent = notationViewPly === null ? 'Live position' : 'Return to live position';
-    liveBtn.onclick = returnToLiveNotationView;
-    hist.appendChild(liveBtn);
+    const latestPly = getLatestPly();
+    const viewedPly = getViewedPly();
+    const controls = document.createElement('div');
+    controls.className = 'notation-controls';
+    controls.innerHTML = `
+        <button class="notation-control-btn" onclick="jumpNotationToStart()" ${viewedPly <= 0 ? 'disabled' : ''} title="Starting position">⏮</button>
+        <button class="notation-control-btn" onclick="stopNotationPlayback(); stepNotation(-1)" ${viewedPly <= 0 ? 'disabled' : ''} title="Back one move">◀</button>
+        <button class="notation-control-btn" onclick="toggleNotationPlayback()" ${latestPly <= 0 ? 'disabled' : ''} title="${notationPlaybackTimer ? 'Pause' : 'Play'}">${notationPlaybackTimer ? '⏸' : '▶'}</button>
+        <button class="notation-control-btn" onclick="stopNotationPlayback(); stepNotation(1)" ${viewedPly >= latestPly ? 'disabled' : ''} title="Forward one move">▶</button>
+        <button class="notation-control-btn" onclick="jumpNotationToLatest()" ${viewedPly >= latestPly ? 'disabled' : ''} title="Most recent position">⏭</button>
+    `;
+    hist.appendChild(controls);
     moveHistory.forEach((m, i) => {
         const row = document.createElement('div'); row.className = 'history-row';
         const whitePly = (i * 2) + 1;
         const blackPly = (i * 2) + 2;
-        row.innerHTML = `<div class="move-num">${i + 1}.</div><button class="notation-move ${notationViewPly === whitePly ? 'active' : ''}" ${m.w ? `onclick="setNotationView(${whitePly})"` : 'disabled'}>${m.w || ''}</button><button class="notation-move ${notationViewPly === blackPly ? 'active' : ''}" ${m.b ? `onclick="setNotationView(${blackPly})"` : 'disabled'}>${m.b || ''}</button>`;
+        row.innerHTML = `<div class="move-num">${i + 1}.</div><button class="notation-move ${viewedPly === whitePly ? 'active' : ''}" ${m.w ? `onclick="stopNotationPlayback(); setNotationView(${whitePly})"` : 'disabled'}>${m.w || ''}</button><button class="notation-move ${viewedPly === blackPly ? 'active' : ''}" ${m.b ? `onclick="stopNotationPlayback(); setNotationView(${blackPly})"` : 'disabled'}>${m.b || ''}</button>`;
         hist.appendChild(row);
     });
     layout.appendChild(sidePanel);

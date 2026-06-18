@@ -1125,7 +1125,7 @@ function handleActualMove(from, to, isLocal, promotionChoice = null, options = {
     else if (moveHistory.length > 0) moveHistory[moveHistory.length - 1].b = notation;
     recordBoardSnapshot();
     if (notationViewPly === boardSnapshots.length - 2) notationViewPly = null;
-    selected = null;
+    if (isLocal || !selected || !getTeam(boardState[selected.r]?.[selected.c])) selected = null;
     if (isLocal && currentPassword) socket.emit("send-move", { password: currentPassword, move: { from, to, promotion: promotedTo }, whiteTime, blackTime });
     if (isLocal && isBotGame && !isGameOver && currentTurn === botColor) {
         setTimeout(makeBotMove, 350);
@@ -1716,7 +1716,17 @@ function updateTimerDisplay() {
 
 function formatTime(seconds) {
     if (isInfinite) return "∞";
-    const s = Math.max(0, seconds); const m = Math.floor(s / 60); const sec = s % 60;
+    const remaining = Math.max(0, Number(seconds) || 0);
+    if (remaining < 20) {
+        const tenthsTotal = Math.ceil(remaining * 10);
+        const m = Math.floor(tenthsTotal / 600);
+        const sec = Math.floor((tenthsTotal % 600) / 10);
+        const tenths = tenthsTotal % 10;
+        return `${m}:${sec.toString().padStart(2, '0')}.${tenths}`;
+    }
+    const wholeSeconds = Math.ceil(remaining);
+    const m = Math.floor(wholeSeconds / 60);
+    const sec = wholeSeconds % 60;
     return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
@@ -1727,9 +1737,9 @@ function startTimer() {
         if (isGameOver) return;
         if (isPaused) { timerLastTick = Date.now(); return; }
         const now = Date.now();
-        const elapsed = Math.floor((now - (timerLastTick || now)) / 1000);
+        const elapsed = (now - (timerLastTick || now)) / 1000;
         if (elapsed <= 0) return;
-        timerLastTick += elapsed * 1000;
+        timerLastTick = now;
         if (currentTurn === 'white') whiteTime -= elapsed; else blackTime -= elapsed;
         updateTimerDisplay();
         if (whiteTime <= 0 || blackTime <= 0) {
@@ -1737,7 +1747,7 @@ function startTimer() {
             const msg = whiteTime <= 0 ? "BLACK WINS ON TIME" : "WHITE WINS ON TIME";
             showResultModal(msg); render(msg);
         }
-    }, 250);
+    }, 100);
 }
 
 function initGameState() {
@@ -2259,7 +2269,7 @@ async function finishPieceDrag(e) {
     if (state.edge) state.edge.remove();
     const target = getBoardSquareFromClientPoint(e.clientX, e.clientY);
     if (!target) {
-        selected = null;
+        selected = { ...state.from };
         render();
         return;
     }
@@ -2268,7 +2278,7 @@ async function finishPieceDrag(e) {
         ? isPremoveMoveAllowed(state.from.r, state.from.c, target.r, target.c)
         : getLegalMoves(currentTurn).some((m) => m.from.r === state.from.r && m.from.c === state.from.c && m.to.r === target.r && m.to.c === target.c);
     if (!legal) {
-        selected = null;
+        selected = { ...state.from };
         render();
         return;
     }

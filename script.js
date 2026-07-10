@@ -3229,6 +3229,7 @@ function closeModal() {
 const CASINO_USER_KEY = "casinoUserProfile";
 let casinoProfile = null;
 let casinoGame = "lobby";
+let casinoState = { message: "Pick a table to start playing." };
 
 function loadCasinoProfile() {
     try { casinoProfile = JSON.parse(localStorage.getItem(CASINO_USER_KEY) || "null"); } catch (_) { casinoProfile = null; }
@@ -3243,33 +3244,43 @@ function loadCasinoProfile() {
 
 function saveCasinoProfile() { localStorage.setItem(CASINO_USER_KEY, JSON.stringify(casinoProfile)); }
 function fmtMoney(value = casinoProfile?.money || 0) { return `${value < 0 ? "-" : ""}$${Math.abs(value).toFixed(2)}`; }
+function cardText(card) { return card ? `${card.r}${card.s}` : "🂠"; }
+function cardHtml(card, hidden = false) { return `<div class="casino-card ${hidden ? 'is-hidden' : (card?.red ? 'is-red' : '')}">${hidden ? '🂠' : cardText(card)}</div>`; }
+function diceHtml(dice, hidden = false) { return dice.map((d) => `<span class="casino-die">${hidden ? '?' : d}</span>`).join(''); }
 function getCasinoBet(defaultBet = 10) {
     const input = document.getElementById('casinoBet');
-    const bet = Math.max(1, Number(input?.value || defaultBet));
+    const bet = Math.max(1, Number(input?.value || casinoState.bet || defaultBet));
+    casinoState.bet = bet;
     if (input) input.value = bet;
     return bet;
 }
-function settleCasino(amount, message) {
+function recordCasino(amount, message) {
     casinoProfile.money = Math.round((casinoProfile.money + amount) * 100) / 100;
     casinoProfile.history.unshift(`${amount >= 0 ? "+" : ""}${fmtMoney(amount)} — ${message}`);
-    casinoProfile.history = casinoProfile.history.slice(0, 12);
+    casinoProfile.history = casinoProfile.history.slice(0, 16);
+    casinoState.message = message;
     saveCasinoProfile();
-    renderCasino(message);
 }
-function casinoLogHtml(message = "Pick a game and place a bet. Debt is allowed for now.") {
+function casinoLogHtml() {
     const history = casinoProfile.history.map((h) => `<li>${h}</li>`).join('') || '<li>No wagers yet.</li>';
-    return `<div class="casino-message">${message}</div><ul class="casino-history">${history}</ul>`;
+    return `<div class="casino-message">${casinoState.message || "Pick a game and place a bet. Debt is allowed for now."}</div><ul class="casino-history">${history}</ul>`;
 }
 function enterCasino() {
     loadCasinoProfile();
     selectedGame = "casino";
     setupView = "casino";
     casinoGame = "lobby";
+    casinoState = { message: "Welcome to the casino. Your browser keeps your bankroll." };
     const overlay = document.getElementById('setup-overlay');
     if (overlay) overlay.remove();
     renderCasino();
 }
-function renderCasino(message) {
+function setCasinoGame(game) {
+    casinoGame = game;
+    casinoState = { message: game === 'lobby' ? "Pick a table to start playing." : "Choose a bet, then start a hand/round." };
+    renderCasino();
+}
+function renderCasino() {
     loadCasinoProfile();
     document.body.classList.remove("coup-mode");
     const layout = document.getElementById('main-layout');
@@ -3277,37 +3288,56 @@ function renderCasino(message) {
     layout.className = "casino-layout";
     layout.innerHTML = `
         <div class="casino-shell">
-            <div class="casino-header"><div><h1>Algebra Casino</h1><p>User: ${casinoProfile.name} · ID saved in this browser</p></div><div class="casino-bankroll">${fmtMoney()}</div></div>
+            <div class="casino-header"><div><h1>Algebra Casino</h1><p>User: ${casinoProfile.name} · saved locally as ${casinoProfile.id}</p></div><div class="casino-bankroll">${fmtMoney()}</div></div>
             <div class="casino-controls">
-                <input id="casinoName" value="${casinoProfile.name}" aria-label="Casino user name"><button class="action-btn" onclick="renameCasinoUser()">Save User</button>
-                <input id="casinoBet" type="number" value="10" min="1" aria-label="Bet amount"><button class="action-btn" onclick="casinoProfile.money=100; casinoProfile.history=[]; saveCasinoProfile(); renderCasino('Bankroll reset to $100.')">Reset $100</button>
+                <label>Name <input id="casinoName" value="${casinoProfile.name}" aria-label="Casino user name"></label><button class="action-btn" onclick="renameCasinoUser()">Save User</button>
+                <label>Table Bet <input id="casinoBet" type="number" value="${casinoState.bet || 10}" min="1" aria-label="Bet amount"></label><button class="action-btn" onclick="casinoProfile.money=100; casinoProfile.history=[]; casinoState.message='Bankroll reset to $100.'; saveCasinoProfile(); renderCasino()">Reset $100</button>
             </div>
             <div class="casino-games">
-                ${casinoButton('lobby','Lobby')}${casinoButton('blackjack','Blackjack')}${casinoButton('roulette','Roulette')}${casinoButton('poker','Poker')}${casinoButton('liars-dice','Liar\'s Dice')}${casinoButton('liars-deck','Liar\'s Deck')}
+                ${casinoButton('lobby','Lobby')}${casinoButton('blackjack','Blackjack')}${casinoButton('roulette','Roulette')}${casinoButton('poker','Draw Poker')}${casinoButton('liars-dice','Liar\'s Dice')}${casinoButton('liars-deck','Liar\'s Deck')}
             </div>
-            <div class="casino-table">${renderCasinoGame(message)}</div>
+            <div class="casino-table">${renderCasinoGame()}</div>
             <button class="action-btn" onclick="location.reload()">Leave Casino</button>
         </div>`;
 }
-function casinoButton(game, label) { return `<button class="${casinoGame === game ? 'start-btn' : 'action-btn'}" onclick="casinoGame='${game}'; renderCasino()">${label}</button>`; }
-function renameCasinoUser() { casinoProfile.name = (document.getElementById('casinoName')?.value || 'Guest').trim() || 'Guest'; saveCasinoProfile(); renderCasino('User saved. Your bankroll persists in this browser.'); }
-function renderCasinoGame(message) {
-    const modes = `<p class="casino-mode-note">Current mode: vs computer/dealer. Multiplayer-ready table codes can be added later.</p>`;
-    if (casinoGame === 'lobby') return `<h2>Welcome</h2><p>Start with $100, keep your balance after closing/reopening through browser storage, and go into debt without consequences.</p>${casinoLogHtml(message)}`;
-    if (casinoGame === 'blackjack') return `<h2>Blackjack</h2>${modes}<p>Dealer draws to 17. Closest to 21 without busting wins.</p><button class="start-btn" onclick="playBlackjack()">Deal Blackjack</button>${casinoLogHtml(message)}`;
-    if (casinoGame === 'roulette') return `<h2>Roulette</h2>${modes}<select id="roulettePick"><option value="red">Red (1:1)</option><option value="black">Black (1:1)</option><option value="green">Green 0 (35:1)</option></select><button class="start-btn" onclick="playRoulette()">Spin</button>${casinoLogHtml(message)}`;
-    if (casinoGame === 'poker') return `<h2>Five-Card Poker</h2>${modes}<p>You and the computer each get five cards. Best hand wins.</p><button class="start-btn" onclick="playPoker()">Deal Poker</button>${casinoLogHtml(message)}`;
-    if (casinoGame === 'liars-dice') return `<h2>Liar's Dice</h2>${modes}<p>You and the computer roll five hidden dice. Beat the computer's claim challenge.</p><button class="start-btn" onclick="playLiarsDice()">Roll & Challenge</button>${casinoLogHtml(message)}`;
-    if (casinoGame === 'liars-deck') return `<h2>Liar's Deck</h2>${modes}<p>Draw three cards. Higher total truthful reveal beats the computer bluff.</p><button class="start-btn" onclick="playLiarsDeck()">Draw Cards</button>${casinoLogHtml(message)}`;
+function casinoButton(game, label) { return `<button class="${casinoGame === game ? 'start-btn' : 'action-btn'}" onclick="setCasinoGame('${game}')">${label}</button>`; }
+function renameCasinoUser() { casinoProfile.name = (document.getElementById('casinoName')?.value || 'Guest').trim() || 'Guest'; casinoState.message = 'User saved. Your bankroll persists in this browser.'; saveCasinoProfile(); renderCasino(); }
+function renderCasinoGame() {
+    if (casinoGame === 'lobby') return `<h2>Welcome</h2><div class="casino-grid"><div><h3>Persistent Bankroll</h3><p>Every player starts with $100. Your balance, username, and history are stored in this browser and can go negative without consequences.</p></div><div><h3>Playable Tables</h3><p>Each game now has rounds, visible hands/boards, decisions, computer/dealer opponents, and ongoing table state instead of one-click results.</p></div></div>${casinoLogHtml()}`;
+    if (casinoGame === 'blackjack') return renderBlackjack();
+    if (casinoGame === 'roulette') return renderRoulette();
+    if (casinoGame === 'poker') return renderPoker();
+    if (casinoGame === 'liars-dice') return renderLiarsDice();
+    if (casinoGame === 'liars-deck') return renderLiarsDeck();
+    return casinoLogHtml();
 }
-function makeDeck() { const ranks=['2','3','4','5','6','7','8','9','10','J','Q','K','A'], suits=['♠','♥','♦','♣']; return ranks.flatMap((r,i)=>suits.map(s=>({r,s,v:Math.min(i+2,14)}))).sort(()=>Math.random()-0.5); }
+function makeDeck() { const ranks=['2','3','4','5','6','7','8','9','10','J','Q','K','A'], suits=['♠','♥','♦','♣']; return shuffle(ranks.flatMap((r,i)=>suits.map(s=>({r,s,v:i+2,red:s==='♥'||s==='♦'})))); }
 function drawCard(deck) { return deck.pop(); }
-function playBlackjack() { const bet=getCasinoBet(); const d=makeDeck(); const hand=()=>[drawCard(d),drawCard(d)]; const val=h=>{let total=h.reduce((a,c)=>a+(c.v>10?10:c.v),0), aces=h.filter(c=>c.r==='A').length; while(aces--&&total+10<=21) total+=10; return total}; const player=hand(), dealer=hand(); while(val(dealer)<17) dealer.push(drawCard(d)); const pv=val(player), dv=val(dealer); const win=pv<=21&&(dv>21||pv>dv), push=pv===dv&&pv<=21; settleCasino(push?0:(win?bet:-bet), `Blackjack: you ${player.map(c=>c.r+c.s).join(' ')} (${pv}), dealer ${dealer.map(c=>c.r+c.s).join(' ')} (${dv}). ${push?'Push.':win?'You win.':'Dealer wins.'}`); }
-function playRoulette() { const bet=getCasinoBet(); const pick=document.getElementById('roulettePick')?.value||'red'; const n=Math.floor(Math.random()*37); const color=n===0?'green':(n%2?'red':'black'); const win=pick===color; settleCasino(win?(pick==='green'?bet*35:bet):-bet, `Roulette landed ${n} ${color}. You picked ${pick}.`); }
-function pokerRank(hand){ const counts={}; hand.forEach(c=>counts[c.v]=(counts[c.v]||0)+1); const vals=Object.values(counts).sort((a,b)=>b-a); if(vals[0]===4)return 7;if(vals[0]===3&&vals[1]===2)return 6;if(vals[0]===3)return 3;if(vals[0]===2&&vals[1]===2)return 2;if(vals[0]===2)return 1;return 0; }
-function playPoker(){ const bet=getCasinoBet(), d=makeDeck(), p=[1,2,3,4,5].map(()=>drawCard(d)), c=[1,2,3,4,5].map(()=>drawCard(d)); const pr=pokerRank(p), cr=pokerRank(c), high=h=>Math.max(...h.map(x=>x.v)); const win=pr>cr||(pr===cr&&high(p)>high(c)), push=pr===cr&&high(p)===high(c); settleCasino(push?0:(win?bet:-bet), `Poker: you ${p.map(x=>x.r+x.s).join(' ')} vs computer ${c.map(x=>x.r+x.s).join(' ')}. ${push?'Tie.':win?'You win.':'Computer wins.'}`); }
-function playLiarsDice(){ const bet=getCasinoBet(); const roll=()=>Array.from({length:5},()=>1+Math.floor(Math.random()*6)); const you=roll(), cpu=roll(); const claim=3+Math.floor(Math.random()*4), face=1+Math.floor(Math.random()*6); const actual=you.concat(cpu).filter(x=>x===face).length; const win=actual<claim; settleCasino(win?bet:-bet, `Liar's Dice: computer claimed ${claim} ${face}s. Rolls had ${actual}. ${win?'Good challenge!':'Claim was safe.'}`); }
-function playLiarsDeck(){ const bet=getCasinoBet(), d=makeDeck(), you=[drawCard(d),drawCard(d),drawCard(d)], cpu=[drawCard(d),drawCard(d),drawCard(d)]; const sum=h=>h.reduce((a,c)=>a+c.v,0); const bluff=Math.floor(Math.random()*12)-4; const win=sum(you)>=sum(cpu)+bluff; settleCasino(win?bet:-bet, `Liar's Deck: your reveal ${you.map(c=>c.r+c.s).join(' ')} (${sum(you)}) vs computer table claim ${sum(cpu)+bluff}. ${win?'You win.':'Computer wins.'}`); }
+function handHtml(hand, hideFirst = false) { return `<div class="casino-hand">${hand.map((c,i)=>cardHtml(c, hideFirst && i === 0)).join('')}</div>`; }
+function blackjackValue(hand) { let total=hand.reduce((a,c)=>a+(c.v>10?10:c.v),0), aces=hand.filter(c=>c.r==='A').length; while(aces-- && total+10<=21) total+=10; return total; }
+function startBlackjack() { const bet=getCasinoBet(); const deck=makeDeck(); casinoState={ bet, phase:'player', deck, player:[drawCard(deck),drawCard(deck)], dealer:[drawCard(deck),drawCard(deck)], message:'Blackjack hand started. Hit, stand, or double.' }; renderCasino(); }
+function blackjackHit() { casinoState.player.push(drawCard(casinoState.deck)); if (blackjackValue(casinoState.player)>21) finishBlackjack('Player busts.'); else casinoState.message='Card dealt. Hit or stand?'; renderCasino(); }
+function blackjackDouble() { casinoState.bet *= 2; casinoState.player.push(drawCard(casinoState.deck)); if (blackjackValue(casinoState.player)>21) finishBlackjack('Double down bust.'); else finishBlackjack('Double down complete.'); }
+function blackjackStand() { finishBlackjack('Dealer plays.'); }
+function finishBlackjack(prefix) { while (blackjackValue(casinoState.dealer)<17) casinoState.dealer.push(drawCard(casinoState.deck)); const pv=blackjackValue(casinoState.player), dv=blackjackValue(casinoState.dealer), win=pv<=21&&(dv>21||pv>dv), push=pv===dv&&pv<=21; casinoState.phase='done'; recordCasino(push?0:(win?casinoState.bet:-casinoState.bet), `${prefix} You ${pv}, dealer ${dv}. ${push?'Push.':win?'You win.':'Dealer wins.'}`); renderCasino(); }
+function renderBlackjack() { const active=casinoState.phase==='player'; return `<h2>Blackjack</h2><p class="casino-mode-note">Full hand vs dealer: hit, stand, double, dealer draws to 17, blackjack-style totals.</p><div class="casino-board"><div><h3>Dealer ${active ? '' : `(${blackjackValue(casinoState.dealer||[])})`}</h3>${handHtml(casinoState.dealer||[], active)}</div><div><h3>You (${blackjackValue(casinoState.player||[])})</h3>${handHtml(casinoState.player||[])}</div></div><div class="casino-actions">${active?'<button class="start-btn" onclick="blackjackHit()">Hit</button><button class="action-btn" onclick="blackjackStand()">Stand</button><button class="action-btn" onclick="blackjackDouble()">Double</button>':'<button class="start-btn" onclick="startBlackjack()">Deal New Hand</button>'}</div>${casinoLogHtml()}`; }
+function rouletteColor(n) { if (n===0) return 'green'; return [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36].includes(n) ? 'red' : 'black'; }
+function playRouletteBet(kind, pick, payout) { const bet=getCasinoBet(); const n=Math.floor(Math.random()*37), color=rouletteColor(n); let win=false; if(kind==='color') win=color===pick; if(kind==='parity') win=n!==0 && ((n%2?'odd':'even')===pick); if(kind==='dozen') win=n>=pick[0]&&n<=pick[1]; if(kind==='number') win=n===Number(pick); recordCasino(win?bet*payout:-bet, `Roulette spun ${n} ${color}. ${win?'Winning bet!':'No hit.'}`); casinoState.spin=n; casinoState.spinColor=color; renderCasino(); }
+function renderRoulette() { const nums=Array.from({length:37},(_,n)=>`<button class="roulette-num ${rouletteColor(n)} ${casinoState.spin===n?'hit':''}" onclick="playRouletteBet('number',${n},35)">${n}</button>`).join(''); return `<h2>Roulette</h2><p class="casino-mode-note">Bet exact numbers, colors, odds/evens, or dozens. The wheel and last result stay visible.</p><div class="roulette-board">${nums}</div><div class="casino-actions"><button class="action-btn" onclick="playRouletteBet('color','red',1)">Red 1:1</button><button class="action-btn" onclick="playRouletteBet('color','black',1)">Black 1:1</button><button class="action-btn" onclick="playRouletteBet('parity','odd',1)">Odd</button><button class="action-btn" onclick="playRouletteBet('parity','even',1)">Even</button><button class="action-btn" onclick="playRouletteBet('dozen',[1,12],2)">1-12</button><button class="action-btn" onclick="playRouletteBet('dozen',[13,24],2)">13-24</button><button class="action-btn" onclick="playRouletteBet('dozen',[25,36],2)">25-36</button></div>${casinoLogHtml()}`; }
+function pokerScore(hand) { const counts={}, vals=hand.map(c=>c.v).sort((a,b)=>b-a); hand.forEach(c=>counts[c.v]=(counts[c.v]||0)+1); const groups=Object.entries(counts).map(([v,c])=>({v:+v,c})).sort((a,b)=>b.c-a.c||b.v-a.v); const flush=hand.every(c=>c.s===hand[0].s), straight=vals.every((v,i)=>i===0||vals[i-1]-1===v) || vals.join(',')==='14,5,4,3,2'; let rank=0,name='High Card'; if(straight&&flush){rank=8;name='Straight Flush';} else if(groups[0].c===4){rank=7;name='Four of a Kind';} else if(groups[0].c===3&&groups[1]?.c===2){rank=6;name='Full House';} else if(flush){rank=5;name='Flush';} else if(straight){rank=4;name='Straight';} else if(groups[0].c===3){rank=3;name='Three of a Kind';} else if(groups[0].c===2&&groups[1]?.c===2){rank=2;name='Two Pair';} else if(groups[0].c===2){rank=1;name='Pair';} return { rank, name, tie: groups.flatMap(g=>Array(g.c).fill(g.v)).join(',') }; }
+function startPoker() { const bet=getCasinoBet(), deck=makeDeck(); casinoState={ bet, phase:'draw', deck, held:[], player:[1,2,3,4,5].map(()=>drawCard(deck)), computer:[1,2,3,4,5].map(()=>drawCard(deck)), message:'Pick cards to hold, then draw.' }; renderCasino(); }
+function togglePokerHold(i) { if (casinoState.phase!=='draw') return; casinoState.held[i]=!casinoState.held[i]; renderCasino(); }
+function pokerDraw() { casinoState.player=casinoState.player.map((c,i)=>casinoState.held[i]?c:drawCard(casinoState.deck)); const ps=pokerScore(casinoState.player), cs=pokerScore(casinoState.computer); const cmp=ps.rank-cs.rank || ps.tie.localeCompare(cs.tie, undefined, { numeric:true }); casinoState.phase='done'; recordCasino(cmp===0?0:(cmp>0?casinoState.bet:-casinoState.bet), `Draw Poker: your ${ps.name} vs computer ${cs.name}. ${cmp===0?'Push.':cmp>0?'You win.':'Computer wins.'}`); renderCasino(); }
+function renderPoker() { const started=casinoState.player; const cards=started?casinoState.player.map((c,i)=>`<button class="poker-card ${casinoState.held?.[i]?'held':''}" onclick="togglePokerHold(${i})">${cardHtml(c)}<span>${casinoState.held?.[i]?'Held':'Hold?'}</span></button>`).join(''):''; return `<h2>Five-Card Draw Poker</h2><p class="casino-mode-note">Deal, choose holds, draw replacements, then compare real poker hand ranks against the computer.</p>${started?`<h3>Your Hand ${casinoState.phase==='done'?`— ${pokerScore(casinoState.player).name}`:''}</h3><div class="casino-hand">${cards}</div><h3>Computer ${casinoState.phase==='done'?`— ${pokerScore(casinoState.computer).name}`:''}</h3>${handHtml(casinoState.computer, casinoState.phase!=='done')}`:''}<div class="casino-actions">${casinoState.phase==='draw'?'<button class="start-btn" onclick="pokerDraw()">Draw Selected Replacements</button>':'<button class="start-btn" onclick="startPoker()">Deal Draw Poker</button>'}</div>${casinoLogHtml()}`; }
+function rollDice(n=5) { return Array.from({length:n},()=>1+Math.floor(Math.random()*6)); }
+function startLiarsDice() { const bet=getCasinoBet(); casinoState={ bet, phase:'bid', you:rollDice(), cpu:rollDice(), quantity:1, face:1, message:'Set an opening bid or let the computer challenge future raises.' }; renderCasino(); }
+function liarsDiceBid() { const q=Math.max(1, Number(document.getElementById('diceQty')?.value||1)), f=Math.max(1, Math.min(6, Number(document.getElementById('diceFace')?.value||1))); casinoState.quantity=q; casinoState.face=f; const actual=casinoState.you.concat(casinoState.cpu).filter(x=>x===f).length; const cpuChallenges=q>actual+Math.floor(Math.random()*3); if(cpuChallenges) finishLiarsDice(true); else { casinoState.quantity=q+1; casinoState.face=f; casinoState.phase='challenge'; casinoState.message=`Computer raises to ${casinoState.quantity} ${f}s. Challenge or raise again.`; renderCasino(); } }
+function finishLiarsDice(cpuChallenged=false) { const actual=casinoState.you.concat(casinoState.cpu).filter(x=>x===casinoState.face).length; const bidTrue=actual>=casinoState.quantity; const youWin=cpuChallenged ? bidTrue : !bidTrue; casinoState.phase='done'; recordCasino(youWin?casinoState.bet:-casinoState.bet, `Liar's Dice: bid was ${casinoState.quantity} ${casinoState.face}s; actual count ${actual}. ${youWin?'You win.':'Computer wins.'}`); renderCasino(); }
+function renderLiarsDice() { const started=casinoState.you; return `<h2>Liar's Dice</h2><p class="casino-mode-note">Roll hidden dice, make quantity/face bids, react to computer raises, and challenge bluffs.</p>${started?`<div class="casino-board"><div><h3>Your Dice</h3>${diceHtml(casinoState.you)}</div><div><h3>Computer Dice</h3>${diceHtml(casinoState.cpu, casinoState.phase!=='done')}</div></div><div class="casino-controls"><label>Quantity <input id="diceQty" type="number" min="1" max="10" value="${casinoState.quantity||1}"></label><label>Face <input id="diceFace" type="number" min="1" max="6" value="${casinoState.face||1}"></label></div>`:''}<div class="casino-actions">${!started||casinoState.phase==='done'?'<button class="start-btn" onclick="startLiarsDice()">Roll New Round</button>':'<button class="start-btn" onclick="liarsDiceBid()">Bid / Raise</button><button class="action-btn" onclick="finishLiarsDice(false)">Challenge Computer</button>'}</div>${casinoLogHtml()}`; }
+function startLiarsDeck() { const bet=getCasinoBet(), deck=makeDeck(); casinoState={ bet, phase:'claim', deck, player:[drawCard(deck),drawCard(deck),drawCard(deck)], cpu:[drawCard(deck),drawCard(deck),drawCard(deck)], claimed:25, message:'Make a total claim for your three-card hand. Computer will call or counter-bluff.' }; renderCasino(); }
+function liarsDeckClaim() { casinoState.claimed=Number(document.getElementById('deckClaim')?.value||25); const real=casinoState.player.reduce((a,c)=>a+c.v,0); const cpuCalls=casinoState.claimed>real+Math.floor(Math.random()*8); if (cpuCalls) finishLiarsDeck(true); else { casinoState.cpuClaim=casinoState.cpu.reduce((a,c)=>a+c.v,0)+Math.floor(Math.random()*8); casinoState.phase='respond'; casinoState.message=`Computer accepts and claims ${casinoState.cpuClaim}. Call bluff or show down.`; renderCasino(); } }
+function finishLiarsDeck(cpuCalled=false) { const real=casinoState.player.reduce((a,c)=>a+c.v,0), cpuReal=casinoState.cpu.reduce((a,c)=>a+c.v,0); const youWin=cpuCalled ? casinoState.claimed<=real : casinoState.cpuClaim>cpuReal; casinoState.phase='done'; recordCasino(youWin?casinoState.bet:-casinoState.bet, `Liar's Deck: your real ${real}, your claim ${casinoState.claimed}, computer real ${cpuReal}${casinoState.cpuClaim?`, computer claim ${casinoState.cpuClaim}`:''}. ${youWin?'You win.':'Computer wins.'}`); renderCasino(); }
+function renderLiarsDeck() { const started=casinoState.player; return `<h2>Liar's Deck</h2><p class="casino-mode-note">A bluffing card table: inspect your cards, claim a total, and decide whether to call the computer's counter-claim.</p>${started?`<div class="casino-board"><div><h3>Your Cards</h3>${handHtml(casinoState.player)}</div><div><h3>Computer Cards</h3>${handHtml(casinoState.cpu, casinoState.phase!=='done')}</div></div><div class="casino-controls"><label>Your Claim <input id="deckClaim" type="number" min="6" max="42" value="${casinoState.claimed||25}"></label></div>`:''}<div class="casino-actions">${!started||casinoState.phase==='done'?'<button class="start-btn" onclick="startLiarsDeck()">Deal Bluff Round</button>':casinoState.phase==='claim'?'<button class="start-btn" onclick="liarsDeckClaim()">Submit Claim</button>':'<button class="start-btn" onclick="finishLiarsDeck(false)">Call Computer Bluff</button><button class="action-btn" onclick="finishLiarsDeck(true)">Show Down</button>'}</div>${casinoLogHtml()}`; }
 
 window.onload = () => {
     setupView = "game-select";

@@ -3246,6 +3246,14 @@ function saveCasinoProfile() { localStorage.setItem(CASINO_USER_KEY, JSON.string
 function fmtMoney(value = casinoProfile?.money || 0) { return `${value < 0 ? "-" : ""}$${Math.abs(value).toFixed(2)}`; }
 function cardText(card) { return card ? `${card.r}${card.s}` : "🂠"; }
 function cardHtml(card, hidden = false) { return `<div class="casino-card ${hidden ? 'is-hidden' : (card?.red ? 'is-red' : '')}">${hidden ? '🂠' : cardText(card)}</div>`; }
+function casinoCoinIcon() { return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14c0 1.657 2.686 3 6 3s6 -1.343 6 -3s-2.686 -3 -6 -3s-6 1.343 -6 3"></path><path d="M9 14v4c0 1.656 2.686 3 6 3s6 -1.344 6 -3v-4"></path><path d="M3 6c0 1.072 1.144 2.062 3 2.598s4.144 .536 6 0c1.856 -.536 3 -1.526 3 -2.598c0 -1.072 -1.144 -2.062 -3 -2.598s-4.144 -.536 -6 0c-1.856 .536 -3 1.526 -3 2.598"></path><path d="M3 6v10c0 .888 .772 1.45 2 2"></path><path d="M3 11c0 .888 .772 1.45 2 2"></path></svg>`; }
+function blackjackCardHtml(card, hidden = false) {
+    if (hidden) return `<img alt="card back" class="blackjack-card-back" src="https://pub-946f093f64394106b88874404781123f.r2.dev/card-back.webp">`;
+    if (!card) return '';
+    const color = card.red ? 'is-red' : 'is-black';
+    return `<div class="blackjack-card ${color}"><div class="blackjack-corner"><span>${card.r}</span><span>${card.s}</span></div><div class="blackjack-suit">${card.s}</div><div class="blackjack-corner blackjack-corner-bottom"><span>${card.r}</span><span>${card.s}</span></div></div>`;
+}
+function blackjackHandHtml(hand = [], hideSecond = false) { return `<div class="blackjack-hand">${hand.map((card, i) => `<div class="blackjack-card-wrap">${blackjackCardHtml(card, hideSecond && i === 1)}</div>`).join('')}</div>`; }
 function diceHtml(dice, hidden = false) { return dice.map((d) => `<span class="casino-die">${hidden ? '?' : d}</span>`).join(''); }
 function getCasinoBet(defaultBet = 10) {
     const input = document.getElementById('casinoBet');
@@ -3302,6 +3310,7 @@ function renderCasino() {
 }
 function casinoButton(game, label) { return `<button class="${casinoGame === game ? 'start-btn' : 'action-btn'}" onclick="setCasinoGame('${game}')">${label}</button>`; }
 function renameCasinoUser() { casinoProfile.name = (document.getElementById('casinoName')?.value || 'Guest').trim() || 'Guest'; casinoState.message = 'User saved. Your bankroll persists in this browser.'; saveCasinoProfile(); renderCasino(); }
+function adjustCasinoBet(multiplier) { const input = document.getElementById('casinoBet'); const current = Math.max(0.01, Number(input?.value || casinoState.bet || 10)); const next = Math.max(0.01, Math.round(current * multiplier * 100) / 100); if (input) input.value = next; casinoState.bet = next; }
 function renderCasinoGame() {
     if (casinoGame === 'lobby') return `<h2>Welcome</h2><div class="casino-grid"><div><h3>Persistent Bankroll</h3><p>Every player starts with $100. Your balance, username, and history are stored in this browser and can go negative without consequences.</p></div><div><h3>Playable Tables</h3><p>Each game now has rounds, visible hands/boards, decisions, computer/dealer opponents, and ongoing table state instead of one-click results.</p></div></div>${casinoLogHtml()}`;
     if (casinoGame === 'blackjack') return renderBlackjack();
@@ -3320,8 +3329,48 @@ function startBlackjack() { const bet=getCasinoBet(); const deck=makeDeck(); cas
 function blackjackHit() { casinoState.player.push(drawCard(casinoState.deck)); if (blackjackValue(casinoState.player)>21) finishBlackjack('Player busts.'); else casinoState.message='Card dealt. Hit or stand?'; renderCasino(); }
 function blackjackDouble() { casinoState.bet *= 2; casinoState.player.push(drawCard(casinoState.deck)); if (blackjackValue(casinoState.player)>21) finishBlackjack('Double down bust.'); else finishBlackjack('Double down complete.'); }
 function blackjackStand() { finishBlackjack('Dealer plays.'); }
+function blackjackSplit() { casinoState.message = 'Split is not available yet. Choose Hit, Stand, or Double.'; renderCasino(); }
 function finishBlackjack(prefix) { while (blackjackValue(casinoState.dealer)<17) casinoState.dealer.push(drawCard(casinoState.deck)); const pv=blackjackValue(casinoState.player), dv=blackjackValue(casinoState.dealer), win=pv<=21&&(dv>21||pv>dv), push=pv===dv&&pv<=21; casinoState.phase='done'; recordCasino(push?0:(win?casinoState.bet:-casinoState.bet), `${prefix} You ${pv}, dealer ${dv}. ${push?'Push.':win?'You win.':'Dealer wins.'}`); renderCasino(); }
-function renderBlackjack() { const active=casinoState.phase==='player'; return `<h2>Blackjack</h2><p class="casino-mode-note">Full hand vs dealer: hit, stand, double, dealer draws to 17, blackjack-style totals.</p><div class="casino-board"><div><h3>Dealer ${active ? '' : `(${blackjackValue(casinoState.dealer||[])})`}</h3>${handHtml(casinoState.dealer||[], active)}</div><div><h3>You (${blackjackValue(casinoState.player||[])})</h3>${handHtml(casinoState.player||[])}</div></div><div class="casino-actions">${active?'<button class="start-btn" onclick="blackjackHit()">Hit</button><button class="action-btn" onclick="blackjackStand()">Stand</button><button class="action-btn" onclick="blackjackDouble()">Double</button>':'<button class="start-btn" onclick="startBlackjack()">Deal New Hand</button>'}</div>${casinoLogHtml()}`; }
+function renderBlackjack() {
+    const active = casinoState.phase === 'player';
+    const player = casinoState.player || [];
+    const dealer = casinoState.dealer || [];
+    const playerTotal = blackjackValue(player);
+    const dealerTotal = active ? blackjackValue(dealer.slice(0, 1)) : blackjackValue(dealer);
+    const message = active ? 'Your turn — Hit, Stand, Double or Split?' : (casinoState.message || 'Hand complete.');
+    const canSplit = active && player.length === 2 && player[0]?.r === player[1]?.r;
+    const overlayClass = active ? 'opacity-0' : 'opacity-100';
+    const lastAmount = casinoState.phase === 'done' ? (casinoProfile.history[0]?.match(/^[+-]?\$[0-9.]+/)?.[0] || '$0.00') : '$0.00';
+    return `<div class="blackjack-fakestake-shell">
+        <aside class="blackjack-bet-panel">
+            <div class="blackjack-bet-card">
+                <div class="blackjack-bet-labels"><span>Bet Amount</span><span>Balance: ${fmtMoney()}</span></div>
+                <div class="blackjack-bet-input-row">
+                    <div class="blackjack-bet-input-wrap"><input id="casinoBet" type="number" min="0.01" step="0.01" value="${casinoState.bet || 10}" ${active ? 'disabled' : ''} aria-label="Blackjack bet amount"><span class="blackjack-coin">${casinoCoinIcon()}</span></div>
+                    <button type="button" onclick="adjustCasinoBet(0.5)" ${active ? 'disabled' : ''}>½</button>
+                    <button type="button" onclick="adjustCasinoBet(2)" ${active ? 'disabled' : ''}>2×</button>
+                </div>
+                <button class="blackjack-deal-btn" type="button" onclick="startBlackjack()" ${active ? 'disabled' : ''}>${player.length ? 'Deal New Hand' : 'Deal Hand'}</button>
+            </div>
+            ${casinoLogHtml()}
+        </aside>
+        <section class="blackjack-table-stage">
+            <p class="blackjack-status-line">${message}</p>
+            <div class="blackjack-seat blackjack-dealer-seat">
+                <div class="blackjack-seat-heading"><span>Dealer</span><strong>${dealerTotal}</strong></div>
+                ${blackjackHandHtml(dealer, active)}
+            </div>
+            <div class="blackjack-seat">
+                <div class="blackjack-seat-heading"><span>You</span><strong>${playerTotal}</strong></div>
+                ${blackjackHandHtml(player)}
+            </div>
+            <div class="blackjack-actions">
+                ${active ? `<button class="blackjack-action hit" onclick="blackjackHit()">Hit</button><button class="blackjack-action stand" onclick="blackjackStand()">Stand</button><button class="blackjack-action double" onclick="blackjackDouble()">Double ×2</button><button class="blackjack-action split" onclick="blackjackSplit()" ${canSplit ? '' : 'disabled title="Split is available on pairs only"'}>Split</button>` : `<button class="blackjack-action hit" onclick="startBlackjack()">Deal New Hand</button>`}
+            </div>
+            <div class="blackjack-result-overlay ${overlayClass}"><div><div class="blackjack-result-mult">${active ? '0.00×' : lastAmount.startsWith('-') ? '0.00×' : lastAmount === '$0.00' ? '1.00×' : '2.00×'}</div><div class="blackjack-result-cash">${lastAmount}</div></div></div>
+        </section>
+    </div>`;
+}
 function rouletteColor(n) { if (n===0) return 'green'; return [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36].includes(n) ? 'red' : 'black'; }
 function playRouletteBet(kind, pick, payout) { const bet=getCasinoBet(); const n=Math.floor(Math.random()*37), color=rouletteColor(n); let win=false; if(kind==='color') win=color===pick; if(kind==='parity') win=n!==0 && ((n%2?'odd':'even')===pick); if(kind==='dozen') win=n>=pick[0]&&n<=pick[1]; if(kind==='number') win=n===Number(pick); recordCasino(win?bet*payout:-bet, `Roulette spun ${n} ${color}. ${win?'Winning bet!':'No hit.'}`); casinoState.spin=n; casinoState.spinColor=color; renderCasino(); }
 function renderRoulette() { const nums=Array.from({length:37},(_,n)=>`<button class="roulette-num ${rouletteColor(n)} ${casinoState.spin===n?'hit':''}" onclick="playRouletteBet('number',${n},35)">${n}</button>`).join(''); return `<h2>Roulette</h2><p class="casino-mode-note">Bet exact numbers, colors, odds/evens, or dozens. The wheel and last result stay visible.</p><div class="roulette-board">${nums}</div><div class="casino-actions"><button class="action-btn" onclick="playRouletteBet('color','red',1)">Red 1:1</button><button class="action-btn" onclick="playRouletteBet('color','black',1)">Black 1:1</button><button class="action-btn" onclick="playRouletteBet('parity','odd',1)">Odd</button><button class="action-btn" onclick="playRouletteBet('parity','even',1)">Even</button><button class="action-btn" onclick="playRouletteBet('dozen',[1,12],2)">1-12</button><button class="action-btn" onclick="playRouletteBet('dozen',[13,24],2)">13-24</button><button class="action-btn" onclick="playRouletteBet('dozen',[25,36],2)">25-36</button></div>${casinoLogHtml()}`; }

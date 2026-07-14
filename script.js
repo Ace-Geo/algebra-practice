@@ -3248,7 +3248,7 @@ function cardText(card) { return card ? `${card.r}${card.s}` : "🂠"; }
 function cardHtml(card, hidden = false) { return `<div class="casino-card ${hidden ? 'is-hidden' : (card?.red ? 'is-red' : '')}">${hidden ? '🂠' : cardText(card)}</div>`; }
 function casinoCoinIcon() { return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14c0 1.657 2.686 3 6 3s6 -1.343 6 -3s-2.686 -3 -6 -3s-6 1.343 -6 3"></path><path d="M9 14v4c0 1.656 2.686 3 6 3s6 -1.344 6 -3v-4"></path><path d="M3 6c0 1.072 1.144 2.062 3 2.598s4.144 .536 6 0c1.856 -.536 3 -1.526 3 -2.598c0 -1.072 -1.144 -2.062 -3 -2.598s-4.144 -.536 -6 0c-1.856 .536 -3 1.526 -3 2.598"></path><path d="M3 6v10c0 .888 .772 1.45 2 2"></path><path d="M3 11c0 .888 .772 1.45 2 2"></path></svg>`; }
 function blackjackCardHtml(card, hidden = false) {
-    if (hidden) return `<img alt="card back" class="blackjack-card-back" src="https://pub-946f093f64394106b88874404781123f.r2.dev/card-back.webp">`;
+    if (hidden) return `<div class="blackjack-card-back" aria-label="Hidden card"><span></span></div>`;
     if (!card) return '';
     const color = card.red ? 'is-red' : 'is-black';
     return `<div class="blackjack-card ${color}"><div class="blackjack-corner"><span>${card.r}</span><span>${card.s}</span></div><div class="blackjack-suit">${card.s}</div><div class="blackjack-corner blackjack-corner-bottom"><span>${card.r}</span><span>${card.s}</span></div></div>`;
@@ -3257,9 +3257,10 @@ function blackjackHandHtml(hand = [], hideSecond = false) { return `<div class="
 function diceHtml(dice, hidden = false) { return dice.map((d) => `<span class="casino-die">${hidden ? '?' : d}</span>`).join(''); }
 function getCasinoBet(defaultBet = 10) {
     const input = document.getElementById('casinoBet');
-    const bet = Math.max(1, Number(input?.value || casinoState.bet || defaultBet));
+    const parsed = Number(String(input?.value || casinoState.bet || defaultBet).replace(/[^0-9.]/g, ''));
+    const bet = Math.max(0.01, Math.round((Number.isFinite(parsed) ? parsed : defaultBet) * 100) / 100);
     casinoState.bet = bet;
-    if (input) input.value = bet;
+    if (input) input.value = bet.toFixed(2);
     return bet;
 }
 function recordCasino(amount, message) {
@@ -3305,12 +3306,12 @@ function renderCasino() {
                 ${casinoButton('lobby','Lobby')}${casinoButton('blackjack','Blackjack')}${casinoButton('roulette','Roulette')}${casinoButton('poker','Draw Poker')}${casinoButton('liars-dice','Liar\'s Dice')}${casinoButton('liars-deck','Liar\'s Deck')}
             </div>
             <div class="casino-table">${renderCasinoGame()}</div>
-            <button class="action-btn" onclick="location.reload()">Leave Casino</button>
+            <button class="action-btn" onclick="${casinoGame === 'blackjack' ? "setCasinoGame('lobby')" : 'location.reload()'}">${casinoGame === 'blackjack' ? 'Back to Casino' : 'Leave Casino'}</button>
         </div>`;
 }
 function casinoButton(game, label) { return `<button class="${casinoGame === game ? 'start-btn' : 'action-btn'}" onclick="setCasinoGame('${game}')">${label}</button>`; }
 function renameCasinoUser() { casinoProfile.name = (document.getElementById('casinoName')?.value || 'Guest').trim() || 'Guest'; casinoState.message = 'User saved. Your bankroll persists in this browser.'; saveCasinoProfile(); renderCasino(); }
-function adjustCasinoBet(multiplier) { const input = document.getElementById('casinoBet'); const current = Math.max(0.01, Number(input?.value || casinoState.bet || 10)); const next = Math.max(0.01, Math.round(current * multiplier * 100) / 100); if (input) input.value = next; casinoState.bet = next; }
+function adjustCasinoBet(multiplier) { const input = document.getElementById('casinoBet'); const current = Math.max(0.01, Number(String(input?.value || casinoState.bet || 10).replace(/[^0-9.]/g, '')) || 10); const next = Math.max(0.01, Math.round(current * multiplier * 100) / 100); if (input) input.value = next.toFixed(2); casinoState.bet = next; }
 function renderCasinoGame() {
     if (casinoGame === 'lobby') return `<h2>Welcome</h2><div class="casino-grid"><div><h3>Persistent Bankroll</h3><p>Every player starts with $100. Your balance, username, and history are stored in this browser and can go negative without consequences.</p></div><div><h3>Playable Tables</h3><p>Each game now has rounds, visible hands/boards, decisions, computer/dealer opponents, and ongoing table state instead of one-click results.</p></div></div>${casinoLogHtml()}`;
     if (casinoGame === 'blackjack') return renderBlackjack();
@@ -3322,31 +3323,38 @@ function renderCasinoGame() {
 }
 function casinoShuffle(items) { for (let i = items.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [items[i], items[j]] = [items[j], items[i]]; } return items; }
 function makeDeck() { const ranks=['2','3','4','5','6','7','8','9','10','J','Q','K','A'], suits=['♠','♥','♦','♣']; return casinoShuffle(ranks.flatMap((r,i)=>suits.map(s=>({r,s,v:i+2,red:s==='♥'||s==='♦'})))); }
+function makeBlackjackDeck() { const ranks=['2','3','4','5','6','7','8','9','10','J','Q','K','A'], suits=['♠','♥','♦','♣']; return casinoShuffle(ranks.flatMap((r)=>suits.map(s=>({r,s,v:r==='A'?1:['J','Q','K'].includes(r)?10:Number(r),red:s==='♥'||s==='♦'})))); }
 function drawCard(deck) { return deck.pop(); }
 function handHtml(hand, hideFirst = false) { return `<div class="casino-hand">${hand.map((c,i)=>cardHtml(c, hideFirst && i === 0)).join('')}</div>`; }
-function blackjackValue(hand) { let total=hand.reduce((a,c)=>a+(c.v>10?10:c.v),0), aces=hand.filter(c=>c.r==='A').length; while(aces-- && total+10<=21) total+=10; return total; }
-function startBlackjack() { const bet=getCasinoBet(); const deck=makeDeck(); casinoState={ bet, phase:'player', deck, player:[drawCard(deck),drawCard(deck)], dealer:[drawCard(deck),drawCard(deck)], message:'Blackjack hand started. Hit, stand, or double.' }; renderCasino(); }
-function blackjackHit() { casinoState.player.push(drawCard(casinoState.deck)); if (blackjackValue(casinoState.player)>21) finishBlackjack('Player busts.'); else casinoState.message='Card dealt. Hit or stand?'; renderCasino(); }
-function blackjackDouble() { casinoState.bet *= 2; casinoState.player.push(drawCard(casinoState.deck)); if (blackjackValue(casinoState.player)>21) finishBlackjack('Double down bust.'); else finishBlackjack('Double down complete.'); }
+function blackjackValue(hand) { let total=hand.reduce((a,c)=>a+(c.r==='A'?1:Math.min(c.v,10)),0), aces=hand.filter(c=>c.r==='A').length; while(aces-- && total+10<=21) total+=10; return total; }
+function startBlackjack() { const bet=getCasinoBet(); const deck=makeBlackjackDeck(); casinoState={ bet, phase:'player', canDoubleSplit:true, deck, player:[drawCard(deck),drawCard(deck)], dealer:[drawCard(deck),drawCard(deck)], message:'Blackjack hand started. Hit, stand, or double.' }; renderCasino(); }
+function blackjackHit() { casinoState.canDoubleSplit = false; casinoState.player.push(drawCard(casinoState.deck)); if (blackjackValue(casinoState.player)>21) finishBlackjack('Player busts.'); else casinoState.message='Card dealt. Hit or stand?'; renderCasino(); }
+function blackjackDouble() { if (!casinoState.canDoubleSplit) return; casinoState.canDoubleSplit = false; casinoState.bet *= 2; casinoState.player.push(drawCard(casinoState.deck)); if (blackjackValue(casinoState.player)>21) finishBlackjack('Double down bust.'); else finishBlackjack('Double down complete.'); }
 function blackjackStand() { finishBlackjack('Dealer plays.'); }
-function blackjackSplit() { casinoState.message = 'Split is not available yet. Choose Hit, Stand, or Double.'; renderCasino(); }
-function finishBlackjack(prefix) { while (blackjackValue(casinoState.dealer)<17) casinoState.dealer.push(drawCard(casinoState.deck)); const pv=blackjackValue(casinoState.player), dv=blackjackValue(casinoState.dealer), win=pv<=21&&(dv>21||pv>dv), push=pv===dv&&pv<=21; casinoState.phase='done'; recordCasino(push?0:(win?casinoState.bet:-casinoState.bet), `${prefix} You ${pv}, dealer ${dv}. ${push?'Push.':win?'You win.':'Dealer wins.'}`); renderCasino(); }
+function blackjackSplit() { casinoState.canDoubleSplit = false; casinoState.message = 'Split is not available yet. Choose Hit or Stand.'; renderCasino(); }
+function finishBlackjack(prefix) { while (blackjackValue(casinoState.dealer)<17) casinoState.dealer.push(drawCard(casinoState.deck)); const pv=blackjackValue(casinoState.player), dv=blackjackValue(casinoState.dealer), win=pv<=21&&(dv>21||pv>dv), push=pv===dv&&pv<=21; casinoState.phase='done'; casinoState.blackjackOutcome = push ? 'push' : win ? 'win' : 'loss'; recordCasino(push?0:(win?casinoState.bet:-casinoState.bet), `${prefix} You ${pv}, dealer ${dv}. ${push?'Push.':win?'You win.':'Dealer wins.'}`); renderCasino(); }
 function renderBlackjack() {
     const active = casinoState.phase === 'player';
     const player = casinoState.player || [];
     const dealer = casinoState.dealer || [];
     const playerTotal = blackjackValue(player);
     const dealerTotal = active ? blackjackValue(dealer.slice(0, 1)) : blackjackValue(dealer);
-    const message = active ? 'Your turn — Hit, Stand, Double or Split?' : (casinoState.message || 'Hand complete.');
-    const canSplit = active && player.length === 2 && player[0]?.r === player[1]?.r;
+    const outcome = casinoState.blackjackOutcome || '';
+    const playerBust = playerTotal > 21;
+    const playerResultClass = outcome === 'win' ? 'is-win' : outcome === 'loss' || playerBust ? 'is-loss' : outcome === 'push' ? 'is-push' : '';
+    const playerTotalText = `${playerTotal}${playerBust ? ' BUST' : ''}`;
+    const message = active ? (casinoState.canDoubleSplit === false ? 'Your turn — Hit or Stand?' : 'Your turn — Hit, Stand, Double or Split?') : (casinoState.message || 'Hand complete.');
+    const canDoubleSplit = active && casinoState.canDoubleSplit !== false && player.length === 2;
+    const canSplit = canDoubleSplit && player[0]?.r === player[1]?.r;
     const overlayClass = active ? 'opacity-0' : 'opacity-100';
     const lastAmount = casinoState.phase === 'done' ? (casinoProfile.history[0]?.match(/^[+-]?\$[0-9.]+/)?.[0] || '$0.00') : '$0.00';
+    const multiplier = outcome === 'win' ? '2.00×' : outcome === 'push' ? '1.00×' : '0.00×';
     return `<div class="blackjack-fakestake-shell">
         <aside class="blackjack-bet-panel">
             <div class="blackjack-bet-card">
                 <div class="blackjack-bet-labels"><span>Bet Amount</span><span>Balance: ${fmtMoney()}</span></div>
                 <div class="blackjack-bet-input-row">
-                    <div class="blackjack-bet-input-wrap"><input id="casinoBet" type="number" min="0.01" step="0.01" value="${casinoState.bet || 10}" ${active ? 'disabled' : ''} aria-label="Blackjack bet amount"><span class="blackjack-coin">${casinoCoinIcon()}</span></div>
+                    <div class="blackjack-bet-input-wrap"><input id="casinoBet" type="text" inputmode="decimal" value="${Number(casinoState.bet || 10).toFixed(2)}" ${active ? 'disabled' : ''} aria-label="Blackjack bet amount"><span class="blackjack-coin">${casinoCoinIcon()}</span></div>
                     <button type="button" onclick="adjustCasinoBet(0.5)" ${active ? 'disabled' : ''}>½</button>
                     <button type="button" onclick="adjustCasinoBet(2)" ${active ? 'disabled' : ''}>2×</button>
                 </div>
@@ -3360,14 +3368,14 @@ function renderBlackjack() {
                 <div class="blackjack-seat-heading"><span>Dealer</span><strong>${dealerTotal}</strong></div>
                 ${blackjackHandHtml(dealer, active)}
             </div>
-            <div class="blackjack-seat">
-                <div class="blackjack-seat-heading"><span>You</span><strong>${playerTotal}</strong></div>
+            <div class="blackjack-seat ${playerResultClass}">
+                <div class="blackjack-seat-heading"><span>You</span><strong>${playerTotalText}</strong></div>
                 ${blackjackHandHtml(player)}
             </div>
             <div class="blackjack-actions">
-                ${active ? `<button class="blackjack-action hit" onclick="blackjackHit()">Hit</button><button class="blackjack-action stand" onclick="blackjackStand()">Stand</button><button class="blackjack-action double" onclick="blackjackDouble()">Double ×2</button><button class="blackjack-action split" onclick="blackjackSplit()" ${canSplit ? '' : 'disabled title="Split is available on pairs only"'}>Split</button>` : `<button class="blackjack-action hit" onclick="startBlackjack()">Deal New Hand</button>`}
+                ${active ? `<button class="blackjack-action hit" onclick="blackjackHit()">Hit</button><button class="blackjack-action stand" onclick="blackjackStand()">Stand</button>${canDoubleSplit ? `<button class="blackjack-action double" onclick="blackjackDouble()">Double ×2</button><button class="blackjack-action split" onclick="blackjackSplit()" ${canSplit ? '' : 'disabled title="Split is available on pairs only"'}>Split</button>` : ''}` : `<button class="blackjack-action hit" onclick="startBlackjack()">Deal New Hand</button>`}
             </div>
-            <div class="blackjack-result-overlay ${overlayClass}"><div><div class="blackjack-result-mult">${active ? '0.00×' : lastAmount.startsWith('-') ? '0.00×' : lastAmount === '$0.00' ? '1.00×' : '2.00×'}</div><div class="blackjack-result-cash">${lastAmount}</div></div></div>
+            <div class="blackjack-result-overlay ${overlayClass} ${outcome}"><div><div class="blackjack-result-mult">${multiplier}</div><div class="blackjack-result-cash">${lastAmount}</div></div></div>
         </section>
     </div>`;
 }

@@ -3311,7 +3311,8 @@ function renderCasinoGame() {
     if (casinoGame === 'liars-deck') return renderLiarsDeck();
     return casinoLogHtml();
 }
-function makeDeck() { const ranks=['2','3','4','5','6','7','8','9','10','J','Q','K','A'], suits=['♠','♥','♦','♣']; return shuffle(ranks.flatMap((r,i)=>suits.map(s=>({r,s,v:i+2,red:s==='♥'||s==='♦'})))); }
+function casinoShuffle(items) { for (let i = items.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [items[i], items[j]] = [items[j], items[i]]; } return items; }
+function makeDeck() { const ranks=['2','3','4','5','6','7','8','9','10','J','Q','K','A'], suits=['♠','♥','♦','♣']; return casinoShuffle(ranks.flatMap((r,i)=>suits.map(s=>({r,s,v:i+2,red:s==='♥'||s==='♦'})))); }
 function drawCard(deck) { return deck.pop(); }
 function handHtml(hand, hideFirst = false) { return `<div class="casino-hand">${hand.map((c,i)=>cardHtml(c, hideFirst && i === 0)).join('')}</div>`; }
 function blackjackValue(hand) { let total=hand.reduce((a,c)=>a+(c.v>10?10:c.v),0), aces=hand.filter(c=>c.r==='A').length; while(aces-- && total+10<=21) total+=10; return total; }
